@@ -1,5 +1,4 @@
 // Entry point for the StockGrader Express API.
-// Real routes (auth, grade, watchlist) get added in Week 2.
 const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
