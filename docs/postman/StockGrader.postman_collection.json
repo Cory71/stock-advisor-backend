@@ -1,0 +1,137 @@
+{
+  "info": {
+    "name": "StockGrader API",
+    "description": "Postman collection for the StockGrader backend.\n\nHow to use:\n1. Import this collection and the matching environment file (StockGrader-Local.postman_environment.json).\n2. Pick the 'StockGrader - Local' environment from the dropdown (top right).\n3. Send POST /api/auth/register once to create the user, or POST /api/auth/login if the user already exists. Copy the 'token' value from the response body.\n4. Set the {{token}} environment variable to that value (Environments tab in the left sidebar).\n5. All other requests inherit Authorization: Bearer {{token}} from collection auth, so they just work after the token is set.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      { "key": "token", "value": "{{token}}", "type": "string" }
+    ]
+  },
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "POST /api/auth/register",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"test@example.com\",\n  \"password\": \"hunter2hunter2\",\n  \"displayName\": \"Test User\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "register"]
+            }
+          }
+        },
+        {
+          "name": "POST /api/auth/login",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"test@example.com\",\n  \"password\": \"hunter2hunter2\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "login"]
+            }
+          }
+        },
+        {
+          "name": "GET /api/auth/me",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "me"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Watchlist",
+      "item": [
+        {
+          "name": "GET /api/watchlist",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/watchlist",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "watchlist"]
+            }
+          }
+        },
+        {
+          "name": "POST /api/watchlist (add AAPL)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ticker\": \"AAPL\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/watchlist",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "watchlist"]
+            }
+          }
+        },
+        {
+          "name": "DELETE /api/watchlist/:ticker",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/watchlist/AAPL",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "watchlist", "AAPL"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Grading",
+      "item": [
+        {
+          "name": "GET /api/grade/:ticker (AAPL)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/grade/AAPL",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "grade", "AAPL"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,6 +1,8 @@
 // User model
-// A registered user. Either email/password (Passport Local) or Google sign-in
-// (Passport Google OAuth), or both linked by the same email.
+// A registered user. Either email/password (bcrypt-hashed) or Google sign-in
+// (Google Identity Services), or both linked by the same email. Both paths
+// end at the same signed JWT — the rest of the app doesn't care which one
+// the user used.
 
 const mongoose = require('mongoose');
 

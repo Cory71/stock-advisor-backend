@@ -6,12 +6,14 @@
 const mongoose = require('mongoose');
 
 // Each criterion is one of the 5 yes/no checks in the grading algorithm.
+// `passed` can be null when we don't have enough data to judge that criterion
+// (e.g. TTM data is missing — the long-term growth checks still work).
 const criterionSchema = new mongoose.Schema({
-  name:   { type: String, required: true },   // e.g. "Topline revenue growth"
-  passed: { type: Boolean, required: true },  // yes/no result
-  value:  { type: Number },                   // the actual number used
-  prior:  { type: Number },                   // the comparison number
-  source: { type: String }                    // e.g. "income statement"
+  name:   { type: String, required: true },                       // e.g. "Topline revenue growth"
+  passed: { type: Boolean, default: null },                       // yes / no / null = N/A
+  value:  { type: Number },                                        // the actual number used
+  prior:  { type: Number },                                        // the comparison number
+  source: { type: String }                                         // e.g. "income statement"
 }, { _id: false }); // sub-docs don't need their own _id
 
 const stockSchema = new mongoose.Schema({

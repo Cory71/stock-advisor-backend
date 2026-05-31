@@ -4,14 +4,20 @@ const cors = require('cors');
 const mongoose = require('mongoose');
 require('dotenv').config();
 
+// Configure passport-jwt before any route imports so the strategy is registered.
+const passport = require('./middleware/passport');
+
 const app = express();
 
 // Middleware
 app.use(cors());
 app.use(express.json());
+app.use(passport.initialize());
 
 // Routes
-// app.use('/api/auth', require('./routes/auth'));
+app.use('/api/auth', require('./routes/auth'));
+app.use('/api/watchlist', require('./routes/watchlist'));
+app.use('/api/grade', require('./routes/grade'));
 
 // Health check — proves the server is alive
 app.get('/', (req, res) => {
