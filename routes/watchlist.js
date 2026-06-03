@@ -16,18 +16,44 @@ const TICKER_PATTERN = /^[A-Z]{1,5}(\.[A-Z]+)?$/;     // e.g. AAPL, BRK.A, SHOP.
 // Every route in this file is protected — apply the middleware once.
 router.use(verifyToken);
 
-// Look up (or grade) a ticker and return the cached Stock document.
-// Used by POST to capture `gradeAtAdd` at the moment the user clicks Add.
-async function ensureStock(ticker) {
-  // Cache hit + fresh — nothing to do. Missing price counts as stale so older
-  // pre-price-field docs get backfilled on the next add.
+// Resolve a user query (ticker or company name) into a fresh-or-cached Stock
+// doc. Same flow as routes/grade.js — including the fallback for inputs that
+// match TICKER_PATTERN but aren't real tickers (e.g. "APPLE" → AAPL, "TESLA"
+// → TSLA). Throws an Error when nothing matches; caller turns that into a 404.
+async function resolveAndGrade(raw) {
+  let ticker = raw.toUpperCase();
+
+  // Step 1 — long inputs are obviously names; resolve them up front.
+  if (!TICKER_PATTERN.test(ticker)) {
+    const resolved = await resolveTicker(raw);
+    if (!resolved) throw new Error(`Couldn't find a stock for "${raw}".`);
+    ticker = resolved.symbol;
+  }
+
+  // Step 2 — cache check. Missing price counts as stale so older pre-price
+  // docs get backfilled on the next add.
   const cached = await Stock.findOne({ ticker });
   if (cached && cached.price != null && Date.now() - cached.updatedAt.getTime() < CACHE_TTL_MS) {
     return cached;
   }
 
-  // Cache miss or stale — fetch + grade now so we can freeze the letter.
-  const rawData = await getStockData(ticker);
+  // Step 3 — fresh grade. If Yahoo doesn't recognise the symbol (because the
+  // input only LOOKED like a ticker — e.g. APPLE), fall back to a search.
+  let rawData;
+  try {
+    rawData = await getStockData(ticker);
+  } catch (err) {
+    const fallback = await resolveTicker(raw);
+    if (!fallback) throw new Error(`Couldn't find a stock for "${raw}".`);
+    ticker = fallback.symbol;
+    // Re-check cache against the newly resolved ticker before re-fetching.
+    const cachedAfter = await Stock.findOne({ ticker });
+    if (cachedAfter && cachedAfter.price != null && Date.now() - cachedAfter.updatedAt.getTime() < CACHE_TTL_MS) {
+      return cachedAfter;
+    }
+    rawData = await getStockData(ticker);
+  }
+
   const graded = gradeStock(rawData);
   const name = rawData.longName || null;
 
@@ -100,36 +126,18 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ message: 'Ticker is required' });
     }
 
-    const raw = ticker.trim();
-    let canonical = raw.toUpperCase();
-
-    // If the input doesn't look like a ticker symbol (e.g. "Apple", "Microsoft"),
-    // resolve it to a canonical ticker via Yahoo search — same flow as /api/grade.
-    if (!TICKER_PATTERN.test(canonical)) {
-      const resolved = await resolveTicker(raw).catch(() => null);
-      if (!resolved) {
-        return res
-          .status(404)
-          .json({ message: `Couldn't find a stock for "${raw}".` });
-      }
-      canonical = resolved.symbol;
-    }
-
-    // Grade the stock so we can store the grade-at-add snapshot.
-    // If this fails (e.g. ticker pattern looked valid but Yahoo doesn't know it),
-    // we don't create the watchlist row.
     let stock;
     try {
-      stock = await ensureStock(canonical);
+      stock = await resolveAndGrade(ticker.trim());
     } catch (err) {
-      return res.status(400).json({
-        message: `Couldn't grade "${canonical}". Check the ticker and try again.`
-      });
+      return res.status(404).json({ message: err.message });
     }
 
+    // Use the canonical ticker from the resolved stock — not whatever the user
+    // typed — so the watchlist row links to /grade/AAPL even if they typed "Apple".
     const item = await WatchlistItem.create({
       userId: req.user.id,
-      ticker: canonical,
+      ticker: stock.ticker,
       gradeAtAdd: stock.grade
     });
 

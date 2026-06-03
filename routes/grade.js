@@ -15,6 +15,18 @@ const router = express.Router();
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;                  // 24 hours
 const TICKER_PATTERN = /^[A-Z]{1,5}(\.[A-Z]+)?$/;           // e.g. AAPL, BRK.A
 
+// Record a lookup in the user's history — but skip if their last search was
+// for the same ticker, so a Refresh / re-navigation doesn't fill the list with
+// duplicates. Fire-and-forget; we don't want history writes blocking the response.
+async function recordHistory(userId, ticker) {
+  const lastSearch = await SearchHistory.findOne({ userId })
+    .sort({ createdAt: -1 })
+    .select('ticker');
+  if (!lastSearch || lastSearch.ticker !== ticker) {
+    SearchHistory.create({ userId, ticker }).catch(() => {});
+  }
+}
+
 // Shape a cached or fresh Stock document into the JSON the frontend expects.
 // `fallbackName` covers older cached docs that pre-date the `name` field.
 function shape(stock, { cached, fallbackName }) {
@@ -71,13 +83,7 @@ router.get('/:query', verifyToken, async (req, res) => {
         }
       }
 
-      // Record the lookup in the user's history (skip if last search was the same ticker).
-      const lastSearch = await SearchHistory.findOne({ userId: req.user.id })
-        .sort({ createdAt: -1 })
-        .select('ticker');
-      if (!lastSearch || lastSearch.ticker !== ticker) {
-        SearchHistory.create({ userId: req.user.id, ticker }).catch(() => {});
-      }
+      await recordHistory(req.user.id, ticker);
       return res.json(shape(cached, { cached: true, fallbackName: resolvedName }));
     }
 
@@ -98,8 +104,9 @@ router.get('/:query', verifyToken, async (req, res) => {
       resolvedName = fallback.name;
       // Re-check cache with the resolved ticker before fetching again.
       const cachedAfter = await Stock.findOne({ ticker });
-      if (cachedAfter && Date.now() - cachedAfter.updatedAt.getTime() < CACHE_TTL_MS) {
-        return res.json(shape(cachedAfter, { cached: true }));
+      if (cachedAfter && cachedAfter.price != null && Date.now() - cachedAfter.updatedAt.getTime() < CACHE_TTL_MS) {
+        await recordHistory(req.user.id, ticker);
+        return res.json(shape(cachedAfter, { cached: true, fallbackName: resolvedName }));
       }
       rawData = await getStockData(ticker);
     }
@@ -124,14 +131,7 @@ router.get('/:query', verifyToken, async (req, res) => {
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
-    // Record history — skip if it's a duplicate back-to-back search.
-    const lastSearch = await SearchHistory.findOne({ userId: req.user.id })
-      .sort({ createdAt: -1 })
-      .select('ticker');
-    if (!lastSearch || lastSearch.ticker !== ticker) {
-      SearchHistory.create({ userId: req.user.id, ticker }).catch(() => {});
-    }
-
+    await recordHistory(req.user.id, ticker);
     res.json(shape(saved, { cached: false, fallbackName: resolvedName }));
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });
