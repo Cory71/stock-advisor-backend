@@ -18,6 +18,8 @@ app.use(passport.initialize());
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/watchlist', require('./routes/watchlist'));
 app.use('/api/grade', require('./routes/grade'));
+app.use('/api/history', require('./routes/history'));
+app.use('/api/compare', require('./routes/compare'));
 
 // Health check — proves the server is alive
 app.get('/', (req, res) => {

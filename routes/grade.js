@@ -1,61 +1,138 @@
-// GET /api/grade/:ticker
-// Returns the A-F grade for a ticker, with the 5-criteria breakdown and the
-// raw numbers used. Caches results in MongoDB for 24 hours so repeated lookups
-// don't hammer Yahoo. Also records the lookup in the user's search history.
+// GET /api/grade/:query
+// `query` can be either a ticker symbol (e.g. "AAPL") or a company name
+// (e.g. "Apple"). The route resolves names to canonical tickers via Yahoo's
+// search endpoint and caches the result in MongoDB for 24 hours.
 
 const express = require('express');
 const verifyToken = require('../middleware/authMiddleware');
 const Stock = require('../models/Stock');
 const SearchHistory = require('../models/SearchHistory');
 const { gradeStock } = require('../lib/grading');
-const { getStockData } = require('../providers/yahooProvider');
+const { getStockData, resolveTicker } = require('../providers/yahooProvider');
 
 const router = express.Router();
 
-const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000;                  // 24 hours
+const TICKER_PATTERN = /^[A-Z]{1,5}(\.[A-Z]+)?$/;           // e.g. AAPL, BRK.A
 
-router.get('/:ticker', verifyToken, async (req, res) => {
+// Shape a cached or fresh Stock document into the JSON the frontend expects.
+// `fallbackName` covers older cached docs that pre-date the `name` field.
+function shape(stock, { cached, fallbackName }) {
+  return {
+    ticker: stock.ticker,
+    name: stock.name || fallbackName || null,
+    price: stock.price ?? null,
+    currency: stock.currency || null,
+    grade: stock.grade,
+    criteria: stock.criteria,
+    rawData: stock.rawData,
+    gradedAt: stock.updatedAt,
+    cached
+  };
+}
+
+router.get('/:query', verifyToken, async (req, res) => {
   try {
-    const ticker = req.params.ticker.toUpperCase();
+    const raw = req.params.query.trim();
+    let ticker = raw.toUpperCase();
+    let resolvedName = null;
 
-    // Record this lookup in the user's history (fire and forget).
-    SearchHistory.create({ userId: req.user.id, ticker }).catch((err) => {
-      console.error('Failed to record search history:', err.message);
-    });
-
-    // Try the cache first.
-    const cached = await Stock.findOne({ ticker });
-    const isFresh = cached && Date.now() - cached.updatedAt.getTime() < CACHE_TTL_MS;
-
-    if (isFresh) {
-      return res.json({
-        ticker: cached.ticker,
-        grade: cached.grade,
-        criteria: cached.criteria,
-        rawData: cached.rawData,
-        gradedAt: cached.updatedAt,
-        cached: true
-      });
+    // If the input doesn't look like a ticker symbol (e.g. "Apple", "Microsoft"),
+    // resolve it to a canonical ticker via Yahoo search before doing anything else.
+    if (!TICKER_PATTERN.test(ticker)) {
+      const resolved = await resolveTicker(raw);
+      if (!resolved) {
+        return res
+          .status(404)
+          .json({ message: `Couldn't find a stock for "${raw}".` });
+      }
+      ticker = resolved.symbol;
+      resolvedName = resolved.name;
     }
 
-    // Cache miss or stale — fetch from Yahoo and grade.
-    const rawData = await getStockData(ticker);
+    // Try the cache first — same canonical ticker, same grade.
+    // Cache is considered stale if it's older than the TTL, OR if it's missing
+    // a price (older records from before the price field existed). Forcing a
+    // re-grade is the simplest way to backfill price on legacy docs.
+    const cached = await Stock.findOne({ ticker });
+    const isFresh = cached
+      && cached.price != null
+      && Date.now() - cached.updatedAt.getTime() < CACHE_TTL_MS;
+
+    if (isFresh) {
+      // Self-heal: if the cached entry is missing `name` (older record from
+      // before this field existed), fetch and store it now so the next lookup
+      // is clean. One-time cost per stale ticker.
+      if (!cached.name && !resolvedName) {
+        const resolved = await resolveTicker(ticker).catch(() => null);
+        if (resolved?.name) {
+          cached.name = resolved.name;
+          await cached.save().catch(() => {});
+        }
+      }
+
+      // Record the lookup in the user's history (skip if last search was the same ticker).
+      const lastSearch = await SearchHistory.findOne({ userId: req.user.id })
+        .sort({ createdAt: -1 })
+        .select('ticker');
+      if (!lastSearch || lastSearch.ticker !== ticker) {
+        SearchHistory.create({ userId: req.user.id, ticker }).catch(() => {});
+      }
+      return res.json(shape(cached, { cached: true, fallbackName: resolvedName }));
+    }
+
+    // Cache miss or stale — fetch fresh data from Yahoo.
+    let rawData;
+    try {
+      rawData = await getStockData(ticker);
+    } catch (err) {
+      // The input looked like a ticker but Yahoo doesn't recognise it. Last
+      // resort: try a search before giving up.
+      const fallback = await resolveTicker(raw);
+      if (!fallback) {
+        return res
+          .status(404)
+          .json({ message: `Couldn't find a stock for "${raw}".` });
+      }
+      ticker = fallback.symbol;
+      resolvedName = fallback.name;
+      // Re-check cache with the resolved ticker before fetching again.
+      const cachedAfter = await Stock.findOne({ ticker });
+      if (cachedAfter && Date.now() - cachedAfter.updatedAt.getTime() < CACHE_TTL_MS) {
+        return res.json(shape(cachedAfter, { cached: true }));
+      }
+      rawData = await getStockData(ticker);
+    }
+
+    // Prefer the name from getStockData (more reliable); fall back to whatever
+    // search returned earlier.
+    const name = rawData.longName || resolvedName;
+
     const graded = gradeStock(rawData);
 
     const saved = await Stock.findOneAndUpdate(
       { ticker },
-      { ticker, grade: graded.grade, criteria: graded.criteria, rawData },
+      {
+        ticker,
+        name,
+        price: rawData.price ?? null,
+        currency: rawData.currency ?? null,
+        grade: graded.grade,
+        criteria: graded.criteria,
+        rawData
+      },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
-    res.json({
-      ticker: saved.ticker,
-      grade: saved.grade,
-      criteria: saved.criteria,
-      rawData: saved.rawData,
-      gradedAt: saved.updatedAt,
-      cached: false
-    });
+    // Record history — skip if it's a duplicate back-to-back search.
+    const lastSearch = await SearchHistory.findOne({ userId: req.user.id })
+      .sort({ createdAt: -1 })
+      .select('ticker');
+    if (!lastSearch || lastSearch.ticker !== ticker) {
+      SearchHistory.create({ userId: req.user.id, ticker }).catch(() => {});
+    }
+
+    res.json(shape(saved, { cached: false, fallbackName: resolvedName }));
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });
   }

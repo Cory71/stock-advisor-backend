@@ -37,6 +37,24 @@ const stockSchema = new mongoose.Schema({
     required: true
   },
 
+  // Company name as Yahoo reports it (e.g. "Apple Inc."). Optional — older
+  // cached entries from before this field was added won't have it.
+  name: {
+    type: String
+  },
+
+  // Last known share price (from Yahoo's `regularMarketPrice`). Optional —
+  // older cached docs won't have it. Refreshes whenever the stock is regraded.
+  price: {
+    type: Number
+  },
+
+  // ISO currency code the price is quoted in (e.g. "USD", "CAD", "EUR").
+  // Yahoo returns this in the price module — we never convert, just label.
+  currency: {
+    type: String
+  },
+
   // Raw revenue + free cash flow snapshots from Yahoo, including TTM.
   // Stored as a flexible object so the UI can show the exact numbers used.
   rawData: {

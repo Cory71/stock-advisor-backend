@@ -16,9 +16,9 @@ const yahooFinance = new YahooFinance({ suppressNotices: ['yahooSurvey'] });
 const HISTORY_START = '2018-01-01';
 
 async function getStockData(ticker) {
-  // Income statement + TTM data come from quoteSummary.
+  // Income statement + TTM data + company name all come from quoteSummary.
   const summary = await yahooFinance.quoteSummary(ticker, {
-    modules: ['incomeStatementHistory', 'financialData']
+    modules: ['incomeStatementHistory', 'financialData', 'price']
   });
 
   // Annual revenues (oldest → newest).
@@ -48,7 +48,32 @@ async function getStockData(ticker) {
     ? summary.financialData.freeCashflow
     : null;
 
-  return { annualRevenues, ttmRevenue, annualFreeCashFlows, ttmFreeCashFlow };
+  // Company name — used by the UI to label the result.
+  const longName = summary.price?.longName || summary.price?.shortName || null;
+
+  // Current share price (snapshot at the time we fetched).
+  const price = typeof summary.price?.regularMarketPrice === 'number'
+    ? summary.price.regularMarketPrice
+    : null;
+
+  // Listing currency for the price above (e.g. "USD" for AAPL, "CAD" for SHOP.TO).
+  const currency = summary.price?.currency || null;
+
+  return { annualRevenues, ttmRevenue, annualFreeCashFlows, ttmFreeCashFlow, longName, price, currency };
 }
 
-module.exports = { getStockData };
+// Resolve a user query (which might be a ticker like "AAPL" or a company name
+// like "Apple") into a canonical ticker symbol + display name using Yahoo's
+// search endpoint. Returns null when no equity match was found.
+async function resolveTicker(query) {
+  const result = await yahooFinance.search(query, { quotesCount: 5, newsCount: 0 });
+  // Find the first equity (regular stock) match — skip ETFs, mutual funds, indices, etc.
+  const equity = result.quotes?.find((q) => q.quoteType === 'EQUITY');
+  if (!equity) return null;
+  return {
+    symbol: equity.symbol,
+    name: equity.longname || equity.shortname || null
+  };
+}
+
+module.exports = { getStockData, resolveTicker };

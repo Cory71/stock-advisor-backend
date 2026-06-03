@@ -17,6 +17,14 @@ const watchlistItemSchema = new mongoose.Schema({
     required: true,
     uppercase: true,
     trim: true
+  },
+
+  // Letter grade at the moment the user added this ticker. Frozen — we never
+  // overwrite it. The "current" grade comes from the live Stock cache so the
+  // UI can show upgrades/downgrades. Optional because rows added before this
+  // field existed won't have one.
+  gradeAtAdd: {
+    type: String
   }
 }, { timestamps: true }); // createdAt = "added to watchlist at"
 

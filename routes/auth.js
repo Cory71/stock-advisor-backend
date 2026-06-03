@@ -44,6 +44,13 @@ router.post('/register', async (req, res) => {
         .json({ message: 'Email and password are required' });
     }
 
+    // Match the frontend's minLength={6} so direct API callers can't bypass it.
+    if (password.length < 6) {
+      return res
+        .status(400)
+        .json({ message: 'Password must be at least 6 characters' });
+    }
+
     // One account per email
     const existing = await User.findOne({ email: email.toLowerCase() });
     if (existing) {
