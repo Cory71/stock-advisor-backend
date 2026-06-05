@@ -2,6 +2,16 @@
 
 Express REST API for StockGrader, a web app that grades publicly traded stocks A–F based on five fundamental financial criteria sourced from Yahoo Finance.
 
+## Live demo
+
+- **API:** <https://stock-advisor-backend-j9gw.onrender.com>
+- **Frontend:** <https://stock-advisor-frontend.vercel.app>
+
+> Hosted on Render's free tier — first request after ~15 min of idle may take
+> 30–60 seconds to wake the dyno. Production env vars are configured in the
+> Render dashboard. CORS is locked down to the Vercel origin via the
+> `CORS_ORIGIN` env var.
+
 ## Prerequisites
 
 - Node.js installed
