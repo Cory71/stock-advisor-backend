@@ -15,7 +15,13 @@ const passport = require('./middleware/passport');
 const app = express();
 
 // Middleware
-app.use(cors());
+// CORS: in production, lock the allowlist down to the deployed frontend(s)
+// via the CORS_ORIGIN env var (comma-separated for multiple). In local dev
+// (no env var set) we allow any origin so localhost ports work without setup.
+const corsOrigin = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(',').map((s) => s.trim())
+  : true;
+app.use(cors({ origin: corsOrigin }));
 app.use(express.json());
 app.use(passport.initialize());
 
