@@ -7,7 +7,7 @@ const verifyToken = require('../middleware/authMiddleware');
 const Stock = require('../models/Stock');
 const SearchHistory = require('../models/SearchHistory');
 const { gradeStock } = require('../lib/grading');
-const { getStockData, resolveTicker } = require('../providers/yahooProvider');
+const yahooProvider = require('../providers/yahooProvider');
 
 const router = express.Router();
 
@@ -23,7 +23,7 @@ async function gradeOne(query, userId) {
 
   // Resolve names to canonical ticker.
   if (!TICKER_PATTERN.test(ticker)) {
-    const resolved = await resolveTicker(raw);
+    const resolved = await yahooProvider.resolveTicker(raw);
     if (!resolved) {
       throw new Error(`Couldn't find a stock for "${raw}".`);
     }
@@ -55,13 +55,13 @@ async function gradeOne(query, userId) {
   // Cache miss — fetch + grade.
   let rawData;
   try {
-    rawData = await getStockData(ticker);
+    rawData = await yahooProvider.getStockData(ticker);
   } catch (err) {
-    const fallback = await resolveTicker(raw);
+    const fallback = await yahooProvider.resolveTicker(raw);
     if (!fallback) throw new Error(`Couldn't find a stock for "${raw}".`);
     ticker = fallback.symbol;
     resolvedName = fallback.name;
-    rawData = await getStockData(ticker);
+    rawData = await yahooProvider.getStockData(ticker);
   }
 
   const name = rawData.longName || resolvedName;
@@ -122,7 +122,12 @@ router.get('/', verifyToken, async (req, res) => {
 
     res.json(results);
   } catch (err) {
-    res.status(500).json({ message: 'Server error', error: err.message });
+    // Note: per-ticker failures are already returned inline above, so this
+    // outer catch only fires for truly broken requests (malformed params, etc.).
+    res.status(503).json({
+      message: 'Stock data is temporarily unavailable. Please try again in a moment.',
+      error: err.message
+    });
   }
 });
 

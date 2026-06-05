@@ -1,0 +1,132 @@
+// API tests for /api/grade/:query — covers ticker lookup, name resolution,
+// cache hit/miss, and the "looks like a ticker but isn't" fallback.
+
+const { expect } = require('chai');
+const request = require('supertest');
+const app = require('../../server');
+const { connect, disconnect, clearCollections } = require('../helpers/testDb');
+const { installStubs, restore, DEFAULT_STOCK_DATA } = require('../helpers/mockYahoo');
+const { createUserAndToken } = require('../helpers/authToken');
+const Stock = require('../../models/Stock');
+const SearchHistory = require('../../models/SearchHistory');
+
+describe('GET /api/grade/:query', () => {
+  let token;
+
+  before(connect);
+  after(disconnect);
+
+  beforeEach(async () => {
+    await clearCollections();
+    ({ token } = await createUserAndToken());
+  });
+  afterEach(restore);
+
+  it('rejects requests without a JWT', async () => {
+    const res = await request(app).get('/api/grade/AAPL');
+    expect(res.status).to.equal(401);
+  });
+
+  it('grades a real ticker on cache miss, then caches the result', async () => {
+    installStubs();
+
+    const res = await request(app)
+      .get('/api/grade/AAPL')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).to.equal(200);
+    expect(res.body).to.include({ ticker: 'AAPL', name: 'Apple Inc.', cached: false });
+    expect(res.body.grade).to.match(/^[A-F]$/);
+    expect(res.body.price).to.equal(310.61);
+    expect(res.body.currency).to.equal('USD');
+
+    const cached = await Stock.findOne({ ticker: 'AAPL' });
+    expect(cached).to.exist;
+    expect(cached.grade).to.equal(res.body.grade);
+  });
+
+  it('returns the cached result on the second lookup', async () => {
+    installStubs();
+
+    // First call writes to the cache.
+    await request(app).get('/api/grade/AAPL').set('Authorization', `Bearer ${token}`);
+
+    // Second call should hit the cache and report cached:true.
+    const res = await request(app)
+      .get('/api/grade/AAPL')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).to.equal(200);
+    expect(res.body.cached).to.equal(true);
+  });
+
+  it('resolves a company name to the canonical ticker', async () => {
+    installStubs({
+      resolved: { symbol: 'MSFT', name: 'Microsoft Corporation' },
+      stockData: { ...DEFAULT_STOCK_DATA, longName: 'Microsoft Corporation' }
+    });
+
+    const res = await request(app)
+      .get('/api/grade/Microsoft')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).to.equal(200);
+    expect(res.body.ticker).to.equal('MSFT');
+    expect(res.body.name).to.equal('Microsoft Corporation');
+  });
+
+  it('uses the search fallback when input looks like a ticker but Yahoo doesn\'t know it', async () => {
+    // First getStockData call (with "APPLE") fails; resolveTicker returns AAPL;
+    // second getStockData call (with "AAPL") succeeds with the default data.
+    const sinon = require('sinon');
+    const yahoo = require('../../providers/yahooProvider');
+
+    const dataStub = sinon.stub(yahoo, 'getStockData');
+    dataStub.onFirstCall().rejects(new Error('Yahoo: not found'));
+    dataStub.onSecondCall().resolves(DEFAULT_STOCK_DATA);
+    sinon.stub(yahoo, 'resolveTicker').resolves({ symbol: 'AAPL', name: 'Apple Inc.' });
+
+    const res = await request(app)
+      .get('/api/grade/APPLE')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).to.equal(200);
+    expect(res.body.ticker).to.equal('AAPL');
+  });
+
+  it('records the canonical ticker in search history', async () => {
+    installStubs({ resolved: { symbol: 'MSFT', name: 'Microsoft Corporation' } });
+
+    await request(app).get('/api/grade/Microsoft').set('Authorization', `Bearer ${token}`);
+
+    const history = await SearchHistory.find({});
+    expect(history).to.have.lengthOf(1);
+    expect(history[0].ticker).to.equal('MSFT');
+  });
+
+  it('returns 404 when nothing resolves', async () => {
+    installStubs({ resolvedNull: true });
+
+    const res = await request(app)
+      .get('/api/grade/nonsense123')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).to.equal(404);
+    expect(res.body.message).to.match(/couldn't find/i);
+  });
+
+  it('returns 503 with a friendly message when Yahoo blows up unexpectedly', async () => {
+    // Both Yahoo calls throw, so the outer try/catch fires the 503 path.
+    const sinon = require('sinon');
+    const yahoo = require('../../providers/yahooProvider');
+    sinon.stub(yahoo, 'getStockData').rejects(new Error('connect ETIMEDOUT'));
+    sinon.stub(yahoo, 'resolveTicker').rejects(new Error('connect ETIMEDOUT'));
+
+    const res = await request(app)
+      .get('/api/grade/Microsoft')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).to.equal(503);
+    expect(res.body.message).to.match(/temporarily unavailable/i);
+  });
+});

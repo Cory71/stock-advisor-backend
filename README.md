@@ -19,9 +19,13 @@ Express REST API for StockGrader, a web app that grades publicly traded stocks A
    PORT=5000
    MONGO_URI=your_mongodb_connection_string
    JWT_SECRET=your_secret_key
+   GOOGLE_CLIENT_ID=your_google_oauth_client_id
 
 4. Start the server
    npm run dev
+
+5. Run the test suite (Mocha + Chai + Supertest, in-memory MongoDB)
+   npm test
 
 ## API Endpoints
 
@@ -33,6 +37,7 @@ All `/api/*` routes (except `register` and `login`) require a valid JWT in the
 | GET | `/` | Health check |
 | POST | `/api/auth/register` | Create a user; returns a signed JWT |
 | POST | `/api/auth/login` | Verify email/password; returns a signed JWT |
+| POST | `/api/auth/google` | Verify a Google ID token; find-or-create the user and return a signed JWT |
 | GET | `/api/auth/me` | Return the current user |
 | GET | `/api/grade/:query` | Grade a stock by ticker **or company name** (resolves names via Yahoo search; caches 24h) |
 | GET | `/api/compare?tickers=A,B,C` | Grade 2 or 3 tickers/names in parallel |
@@ -43,7 +48,7 @@ All `/api/*` routes (except `register` and `login`) require a valid JWT in the
 
 ## Data Models
 
-- **`User`** — email, passwordHash (bcrypt), displayName
+- **`User`** — email, passwordHash (bcrypt; optional for Google-only accounts), googleId (sparse-unique), displayName
 - **`Stock`** — ticker, name, price, currency, grade, criteria, rawData (shared cache, 24h TTL)
 - **`WatchlistItem`** — userId, ticker, gradeAtAdd (compound unique index on user + ticker)
 - **`SearchHistory`** — userId, ticker
@@ -52,14 +57,24 @@ All `/api/*` routes (except `register` and `login`) require a valid JWT in the
 
 ```text
 backend/
-  server.js            # Express app + Mongo connect + route registration
-  lib/grading.js       # Pure 5-criteria grading function (unit-tested)
+  server.js                # Express app + Mongo connect + route registration
+  lib/grading.js           # Pure 5-criteria grading function (unit-tested)
   providers/
-    yahooProvider.js   # Yahoo Finance adapter (getStockData, resolveTicker)
+    yahooProvider.js       # Yahoo Finance adapter (getStockData, resolveTicker)
   middleware/
-    passport.js        # passport-jwt strategy
-    authMiddleware.js  # friendly 401 wrapper around passport.authenticate
-  models/              # Mongoose schemas
-  routes/              # auth, grade, compare, history, watchlist
-  tests/               # Mocha + Chai unit tests for grading
+    passport.js            # passport-jwt strategy
+    authMiddleware.js      # friendly 401 wrapper around passport.authenticate
+  models/                  # Mongoose schemas
+  routes/                  # auth, grade, compare, history, watchlist
+  tests/
+    grading.test.js        # 13 unit tests on the pure grading function
+    api/                   # 37 Supertest specs across 5 routes
+    helpers/               # in-memory Mongo, JWT helper, Yahoo provider stubs
+    setup.js               # mocha --require hook (test env vars)
 ```
+
+## Testing
+
+Backend tests live in `tests/` and run with `npm test` — a single command
+spins up an in-memory MongoDB (via `mongodb-memory-server`), stubs the Yahoo
+Finance provider with `sinon`, and runs all 50 tests in ~5 seconds.
