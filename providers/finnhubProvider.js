@@ -18,27 +18,36 @@
 
 const BASE_URL = 'https://finnhub.io/api/v1';
 
-// Finnhub XBRL concepts use a "us-gaap_" prefix, e.g.
-// "us-gaap_RevenueFromContractWithCustomerExcludingAssessedTax".
-// List multiple fallbacks because different companies use different tags.
+// Finnhub XBRL concepts vary by company: some file with a "us-gaap_" prefix
+// (e.g. Apple), others use bare names (e.g. Alphabet/Google). List both forms
+// so the same code works across different filers.
 const REVENUE_CONCEPTS = [
   'us-gaap_RevenueFromContractWithCustomerExcludingAssessedTax',
+  'RevenueFromContractWithCustomerExcludingAssessedTax',
   'us-gaap_Revenues',
+  'Revenues',
   'us-gaap_SalesRevenueNet',
+  'SalesRevenueNet',
   'us-gaap_NetRevenues',
+  'NetRevenues',
   'us-gaap_RevenuesNetOfInterestExpense',
+  'RevenuesNetOfInterestExpense',
 ];
 
 const OCF_CONCEPTS = [
   'us-gaap_NetCashProvidedByUsedInOperatingActivities',
+  'NetCashProvidedByUsedInOperatingActivities',
 ];
 
 // CapEx is reported as a negative cash outflow in the CF statement.
 // FCF = OCF + capex (where capex is already negative).
 const CAPEX_CONCEPTS = [
   'us-gaap_PaymentsToAcquirePropertyPlantAndEquipment',
+  'PaymentsToAcquirePropertyPlantAndEquipment',
   'us-gaap_CapitalExpendituresIncurringObligation',
+  'CapitalExpendituresIncurringObligation',
   'us-gaap_PurchaseOfPropertyPlantAndEquipment',
+  'PurchaseOfPropertyPlantAndEquipment',
 ];
 
 // Return the first matching XBRL concept value from an array of { concept, value } items.
