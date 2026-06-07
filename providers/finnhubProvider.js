@@ -18,6 +18,22 @@
 
 const BASE_URL = 'https://finnhub.io/api/v1';
 
+// How many recent annual periods to grade on. Finnhub returns wildly different
+// history lengths per stock (Apple ~16 years, Alphabet ~11), so we cap to the
+// most recent N years. This makes "long-term growth" mean the same span for
+// every stock instead of comparing a 15-year trend against a 5-year one.
+const ANNUAL_LOOKBACK_YEARS = 5;
+
+// Finnhub's financials-reported endpoint maps a ticker to whichever SEC filer
+// (CIK) currently or historically held that symbol. For a few tickers that map
+// is stale — it points at a defunct filer instead of the live company:
+//   GOOG  -> "Google Inc." (frozen at 2015); Alphabet now files under GOOGL.
+// We fetch fundamentals under the corrected symbol while still using the
+// original ticker for the live price and profile (same underlying company).
+const FINANCIALS_SYMBOL_ALIASES = {
+  GOOG: 'GOOGL',
+};
+
 // Finnhub XBRL concepts vary by company: some file with a "us-gaap_" prefix
 // (e.g. Apple), others use bare names (e.g. Alphabet/Google). List both forms
 // so the same code works across different filers.
@@ -145,12 +161,16 @@ function computeTTM(annuals, quartersYTD, field) {
 }
 
 async function getStockData(ticker) {
+  // Price and profile use the ticker as-is; fundamentals use the corrected
+  // symbol when the ticker maps to a stale SEC filer (see the alias map above).
+  const finSymbol = FINANCIALS_SYMBOL_ALIASES[ticker] || ticker;
+
   // Four requests fire in parallel to keep latency low.
   const [quote, profile, annualFin, quarterlyFin] = await Promise.all([
     finnhubGet('/quote',                     { symbol: ticker }),
     finnhubGet('/stock/profile2',            { symbol: ticker }),
-    finnhubGet('/stock/financials-reported', { symbol: ticker, freq: 'annual' }),
-    finnhubGet('/stock/financials-reported', { symbol: ticker, freq: 'quarterly' }),
+    finnhubGet('/stock/financials-reported', { symbol: finSymbol, freq: 'annual' }),
+    finnhubGet('/stock/financials-reported', { symbol: finSymbol, freq: 'quarterly' }),
   ]);
 
   // An empty profile means Finnhub doesn't recognise this ticker.
@@ -158,21 +178,39 @@ async function getStockData(ticker) {
     throw new Error(`Finnhub has no data for "${ticker}"`);
   }
 
+  // Full history is kept for the TTM calculation (it needs the prior year),
+  // but the graded arrays are capped to the most recent few years.
   const annualData    = parseAnnualReports(annualFin.data ?? []);
   const quarterlyData = parseQuarterlyYTD(quarterlyFin.data ?? []);
+  const recentAnnual  = annualData.slice(-ANNUAL_LOOKBACK_YEARS);
 
-  const annualRevenues      = annualData.map((a) => a.revenue);
-  const annualFreeCashFlows = annualData.filter((a) => a.fcf !== null).map((a) => a.fcf);
+  const annualRevenues      = recentAnnual.map((a) => a.revenue);
+  const annualFreeCashFlows = recentAnnual.filter((a) => a.fcf !== null).map((a) => a.fcf);
 
   const ttmRevenue      = computeTTM(annualData, quarterlyData, 'revenue');
   const ttmFreeCashFlow = computeTTM(annualData, quarterlyData, 'fcf');
+
+  // The year of the most recent annual report. The grader uses this to detect
+  // stale data (a ticker whose fundamentals belong to a defunct filer).
+  const latestAnnualYear = annualData.length
+    ? annualData[annualData.length - 1].year
+    : null;
 
   // quote.c is the current price; 0 means no data, so treat it as null.
   const price    = typeof quote.c === 'number' && quote.c > 0 ? quote.c : null;
   const currency = profile.currency || null;
   const longName = profile.name    || null;
 
-  return { annualRevenues, ttmRevenue, annualFreeCashFlows, ttmFreeCashFlow, longName, price, currency };
+  return {
+    annualRevenues,
+    ttmRevenue,
+    annualFreeCashFlows,
+    ttmFreeCashFlow,
+    latestAnnualYear,
+    longName,
+    price,
+    currency,
+  };
 }
 
 // Resolve a user query (company name or partial ticker) to { symbol, name }.

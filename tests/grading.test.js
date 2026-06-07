@@ -137,3 +137,31 @@ describe('gradeStock — N/A handling', () => {
     expect(result.grade).to.equal('N/A');
   });
 });
+
+describe('gradeStock — stale data guard', () => {
+  // Pass currentYear explicitly so the test doesn't depend on today's date.
+  it('returns N/A when the latest annual report is more than 2 years old', () => {
+    const data = { ...allYesData, latestAnnualYear: 2015 };
+    const result = gradeStock(data, 2026);
+    expect(result.grade).to.equal('N/A');
+    expect(result.reason).to.match(/outdated/i);
+    expect(result.reason).to.include('2015');
+  });
+
+  it('grades normally when the latest annual report is recent', () => {
+    const data = { ...allYesData, latestAnnualYear: 2025 };
+    const result = gradeStock(data, 2026);
+    expect(result.grade).to.equal('A');
+  });
+
+  it('allows data up to 2 years old (boundary)', () => {
+    const data = { ...allYesData, latestAnnualYear: 2024 };
+    const result = gradeStock(data, 2026);
+    expect(result.grade).to.equal('A');
+  });
+
+  it('skips the guard when latestAnnualYear is absent (backward compatible)', () => {
+    const result = gradeStock(allYesData, 2026);
+    expect(result.grade).to.equal('A');
+  });
+});
