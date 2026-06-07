@@ -44,6 +44,8 @@ const OCF_CONCEPTS = [
 const CAPEX_CONCEPTS = [
   'us-gaap_PaymentsToAcquirePropertyPlantAndEquipment',
   'PaymentsToAcquirePropertyPlantAndEquipment',
+  'us-gaap_PaymentsToAcquireProductiveAssets',   // NVIDIA and similar
+  'PaymentsToAcquireProductiveAssets',
   'us-gaap_CapitalExpendituresIncurringObligation',
   'CapitalExpendituresIncurringObligation',
   'us-gaap_PurchaseOfPropertyPlantAndEquipment',
