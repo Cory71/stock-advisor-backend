@@ -53,10 +53,17 @@ const REVENUE_CONCEPTS = [
 const OCF_CONCEPTS = [
   'us-gaap_NetCashProvidedByUsedInOperatingActivities',
   'NetCashProvidedByUsedInOperatingActivities',
+  // Some filers (e.g. Disney) report operating cash flow under the
+  // "continuing operations" variant in years with discontinued segments.
+  'us-gaap_NetCashProvidedByUsedInOperatingActivitiesContinuingOperations',
+  'NetCashProvidedByUsedInOperatingActivitiesContinuingOperations',
 ];
 
-// CapEx is reported as a negative cash outflow in the CF statement.
-// FCF = OCF + capex (where capex is already negative).
+// Capital expenditure concepts. Finnhub reports the payment as a positive
+// number (the outflow magnitude), so free cash flow subtracts it:
+//   FCF = OCF - |CapEx|
+// Using the absolute value keeps it correct even if a filer signs CapEx
+// negative instead.
 const CAPEX_CONCEPTS = [
   'us-gaap_PaymentsToAcquirePropertyPlantAndEquipment',
   'PaymentsToAcquirePropertyPlantAndEquipment',
@@ -104,7 +111,7 @@ function parseAnnualReports(reports) {
     const revenue = findValue(ic, ...REVENUE_CONCEPTS);
     const ocf     = findValue(cf, ...OCF_CONCEPTS);
     const capex   = findValue(cf, ...CAPEX_CONCEPTS);
-    const fcf     = ocf !== null && capex !== null ? ocf + capex : null;
+    const fcf     = ocf !== null && capex !== null ? ocf - Math.abs(capex) : null;
 
     if (revenue !== null) {
       annuals.push({ year: report.year, revenue, fcf });
@@ -124,7 +131,7 @@ function parseQuarterlyYTD(reports) {
     const revenue = findValue(ic, ...REVENUE_CONCEPTS);
     const ocf     = findValue(cf, ...OCF_CONCEPTS);
     const capex   = findValue(cf, ...CAPEX_CONCEPTS);
-    const fcf     = ocf !== null && capex !== null ? ocf + capex : null;
+    const fcf     = ocf !== null && capex !== null ? ocf - Math.abs(capex) : null;
 
     if (revenue !== null) {
       quarters.push({ year: report.year, quarter: report.quarter, revenue, fcf });
