@@ -79,7 +79,7 @@ describe('GET /api/grade/:query', () => {
     // First getStockData call (with "APPLE") fails; resolveTicker returns AAPL;
     // second getStockData call (with "AAPL") succeeds with the default data.
     const sinon = require('sinon');
-    const yahoo = require('../../providers/yahooProvider');
+    const yahoo = require('../../providers/finnhubProvider');
 
     const dataStub = sinon.stub(yahoo, 'getStockData');
     dataStub.onFirstCall().rejects(new Error('Yahoo: not found'));
@@ -118,7 +118,7 @@ describe('GET /api/grade/:query', () => {
   it('returns 503 with a friendly message when Yahoo blows up unexpectedly', async () => {
     // Both Yahoo calls throw, so the outer try/catch fires the 503 path.
     const sinon = require('sinon');
-    const yahoo = require('../../providers/yahooProvider');
+    const yahoo = require('../../providers/finnhubProvider');
     sinon.stub(yahoo, 'getStockData').rejects(new Error('connect ETIMEDOUT'));
     sinon.stub(yahoo, 'resolveTicker').rejects(new Error('connect ETIMEDOUT'));
 

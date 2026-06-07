@@ -6,7 +6,7 @@ const WatchlistItem = require('../models/WatchlistItem');
 const Stock = require('../models/Stock');
 const verifyToken = require('../middleware/authMiddleware');
 const { gradeStock } = require('../lib/grading');
-const yahooProvider = require('../providers/yahooProvider');
+const finnhubProvider = require('../providers/finnhubProvider');
 
 const router = express.Router();
 
@@ -25,7 +25,7 @@ async function resolveAndGrade(raw) {
 
   // Step 1 — long inputs are obviously names; resolve them up front.
   if (!TICKER_PATTERN.test(ticker)) {
-    const resolved = await yahooProvider.resolveTicker(raw);
+    const resolved = await finnhubProvider.resolveTicker(raw);
     if (!resolved) throw new Error(`Couldn't find a stock for "${raw}".`);
     ticker = resolved.symbol;
   }
@@ -41,9 +41,9 @@ async function resolveAndGrade(raw) {
   // input only LOOKED like a ticker — e.g. APPLE), fall back to a search.
   let rawData;
   try {
-    rawData = await yahooProvider.getStockData(ticker);
+    rawData = await finnhubProvider.getStockData(ticker);
   } catch (err) {
-    const fallback = await yahooProvider.resolveTicker(raw);
+    const fallback = await finnhubProvider.resolveTicker(raw);
     if (!fallback) throw new Error(`Couldn't find a stock for "${raw}".`);
     ticker = fallback.symbol;
     // Re-check cache against the newly resolved ticker before re-fetching.
@@ -51,7 +51,7 @@ async function resolveAndGrade(raw) {
     if (cachedAfter && cachedAfter.price != null && Date.now() - cachedAfter.updatedAt.getTime() < CACHE_TTL_MS) {
       return cachedAfter;
     }
-    rawData = await yahooProvider.getStockData(ticker);
+    rawData = await finnhubProvider.getStockData(ticker);
   }
 
   const graded = gradeStock(rawData);

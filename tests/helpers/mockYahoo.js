@@ -1,10 +1,10 @@
-// Sinon stubs for the Yahoo Finance provider so tests never hit the real API.
+// Sinon stubs for the Finnhub provider so tests never hit the real API.
 // Each spec calls `installStubs(...)` in a beforeEach with whatever responses
 // it wants, then `restore()` in afterEach to clean up. This keeps tests fast,
 // deterministic, and offline-safe.
 
 const sinon = require('sinon');
-const yahooProvider = require('../../providers/yahooProvider');
+const finnhubProvider = require('../../providers/finnhubProvider');
 
 // A reasonable default for happy-path tests — Apple-shaped numbers that
 // produce a B grade (passes 4 of 5 criteria).
@@ -24,14 +24,14 @@ function installStubs({
   stockDataError = null,
   resolvedNull = false
 } = {}) {
-  const stockDataStub = sinon.stub(yahooProvider, 'getStockData');
+  const stockDataStub = sinon.stub(finnhubProvider, 'getStockData');
   if (stockDataError) {
     stockDataStub.rejects(stockDataError);
   } else {
     stockDataStub.resolves(stockData);
   }
 
-  const resolveStub = sinon.stub(yahooProvider, 'resolveTicker');
+  const resolveStub = sinon.stub(finnhubProvider, 'resolveTicker');
   if (resolvedNull) {
     resolveStub.resolves(null);
   } else {

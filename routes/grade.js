@@ -9,8 +9,8 @@ const Stock = require('../models/Stock');
 const SearchHistory = require('../models/SearchHistory');
 const { gradeStock } = require('../lib/grading');
 // Imported as a namespace (not destructured) so test stubs that swap out
-// `yahooProvider.getStockData` are actually seen by these route handlers.
-const yahooProvider = require('../providers/yahooProvider');
+// `finnhubProvider.getStockData` are actually seen by these route handlers.
+const finnhubProvider = require('../providers/finnhubProvider');
 
 const router = express.Router();
 
@@ -54,7 +54,7 @@ router.get('/:query', verifyToken, async (req, res) => {
     // If the input doesn't look like a ticker symbol (e.g. "Apple", "Microsoft"),
     // resolve it to a canonical ticker via Yahoo search before doing anything else.
     if (!TICKER_PATTERN.test(ticker)) {
-      const resolved = await yahooProvider.resolveTicker(raw);
+      const resolved = await finnhubProvider.resolveTicker(raw);
       if (!resolved) {
         return res
           .status(404)
@@ -78,7 +78,7 @@ router.get('/:query', verifyToken, async (req, res) => {
       // before this field existed), fetch and store it now so the next lookup
       // is clean. One-time cost per stale ticker.
       if (!cached.name && !resolvedName) {
-        const resolved = await yahooProvider.resolveTicker(ticker).catch(() => null);
+        const resolved = await finnhubProvider.resolveTicker(ticker).catch(() => null);
         if (resolved?.name) {
           cached.name = resolved.name;
           await cached.save().catch(() => {});
@@ -92,11 +92,11 @@ router.get('/:query', verifyToken, async (req, res) => {
     // Cache miss or stale — fetch fresh data from Yahoo.
     let rawData;
     try {
-      rawData = await yahooProvider.getStockData(ticker);
+      rawData = await finnhubProvider.getStockData(ticker);
     } catch (err) {
       // The input looked like a ticker but Yahoo doesn't recognise it. Last
       // resort: try a search before giving up.
-      const fallback = await yahooProvider.resolveTicker(raw);
+      const fallback = await finnhubProvider.resolveTicker(raw);
       if (!fallback) {
         return res
           .status(404)
@@ -110,7 +110,7 @@ router.get('/:query', verifyToken, async (req, res) => {
         await recordHistory(req.user.id, ticker);
         return res.json(shape(cachedAfter, { cached: true, fallbackName: resolvedName }));
       }
-      rawData = await yahooProvider.getStockData(ticker);
+      rawData = await finnhubProvider.getStockData(ticker);
     }
 
     // Prefer the name from getStockData (more reliable); fall back to whatever
@@ -136,10 +136,9 @@ router.get('/:query', verifyToken, async (req, res) => {
     await recordHistory(req.user.id, ticker);
     res.json(shape(saved, { cached: false, fallbackName: resolvedName }));
   } catch (err) {
-    // This path almost always means Yahoo Finance is having a moment — the
-    // route's main work is calling Yahoo, and 404s for unknown tickers are
-    // already handled above. The technical error string still ships in
-    // `error` for server-side debugging.
+    // This path fires when Finnhub is unreachable or returns an unexpected error.
+    // 404s for unknown tickers are handled above. The raw error is included for
+    // server-side debugging.
     res.status(503).json({
       message: 'Stock data is temporarily unavailable. Please try again in a moment.',
       error: err.message

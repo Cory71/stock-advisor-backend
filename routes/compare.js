@@ -7,7 +7,7 @@ const verifyToken = require('../middleware/authMiddleware');
 const Stock = require('../models/Stock');
 const SearchHistory = require('../models/SearchHistory');
 const { gradeStock } = require('../lib/grading');
-const yahooProvider = require('../providers/yahooProvider');
+const finnhubProvider = require('../providers/finnhubProvider');
 
 const router = express.Router();
 
@@ -23,7 +23,7 @@ async function gradeOne(query, userId) {
 
   // Resolve names to canonical ticker.
   if (!TICKER_PATTERN.test(ticker)) {
-    const resolved = await yahooProvider.resolveTicker(raw);
+    const resolved = await finnhubProvider.resolveTicker(raw);
     if (!resolved) {
       throw new Error(`Couldn't find a stock for "${raw}".`);
     }
@@ -55,13 +55,13 @@ async function gradeOne(query, userId) {
   // Cache miss — fetch + grade.
   let rawData;
   try {
-    rawData = await yahooProvider.getStockData(ticker);
+    rawData = await finnhubProvider.getStockData(ticker);
   } catch (err) {
-    const fallback = await yahooProvider.resolveTicker(raw);
+    const fallback = await finnhubProvider.resolveTicker(raw);
     if (!fallback) throw new Error(`Couldn't find a stock for "${raw}".`);
     ticker = fallback.symbol;
     resolvedName = fallback.name;
-    rawData = await yahooProvider.getStockData(ticker);
+    rawData = await finnhubProvider.getStockData(ticker);
   }
 
   const name = rawData.longName || resolvedName;
