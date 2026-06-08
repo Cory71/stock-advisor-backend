@@ -47,6 +47,8 @@ async function gradeOne(query, userId) {
       currency: cached.currency || null,
       grade: cached.grade,
       criteria: cached.criteria,
+      reason: cached.reason || null,
+      note: cached.note || null,
       gradedAt: cached.updatedAt,
       cached: true
     };
@@ -76,6 +78,8 @@ async function gradeOne(query, userId) {
       currency: rawData.currency ?? null,
       grade: graded.grade,
       criteria: graded.criteria,
+      reason: graded.reason ?? null,
+      note: graded.note ?? null,
       rawData
     },
     { upsert: true, new: true, setDefaultsOnInsert: true }
@@ -94,6 +98,8 @@ async function gradeOne(query, userId) {
     currency: saved.currency || null,
     grade: saved.grade,
     criteria: saved.criteria,
+    reason: saved.reason || null,
+    note: saved.note || null,
     gradedAt: saved.updatedAt,
     cached: false
   };

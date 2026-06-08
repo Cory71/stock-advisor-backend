@@ -5,7 +5,7 @@ const { expect } = require('chai');
 const request = require('supertest');
 const app = require('../../server');
 const { connect, disconnect, clearCollections } = require('../helpers/testDb');
-const { installStubs, restore, DEFAULT_STOCK_DATA } = require('../helpers/mockYahoo');
+const { installStubs, restore, DEFAULT_STOCK_DATA } = require('../helpers/mockProvider');
 const { createUserAndToken } = require('../helpers/authToken');
 const Stock = require('../../models/Stock');
 const SearchHistory = require('../../models/SearchHistory');
@@ -75,16 +75,16 @@ describe('GET /api/grade/:query', () => {
     expect(res.body.name).to.equal('Microsoft Corporation');
   });
 
-  it('uses the search fallback when input looks like a ticker but Yahoo doesn\'t know it', async () => {
+  it('uses the search fallback when input looks like a ticker but the provider doesn\'t know it', async () => {
     // First getStockData call (with "APPLE") fails; resolveTicker returns AAPL;
     // second getStockData call (with "AAPL") succeeds with the default data.
     const sinon = require('sinon');
-    const yahoo = require('../../providers/finnhubProvider');
+    const provider = require('../../providers/finnhubProvider');
 
-    const dataStub = sinon.stub(yahoo, 'getStockData');
-    dataStub.onFirstCall().rejects(new Error('Yahoo: not found'));
+    const dataStub = sinon.stub(provider, 'getStockData');
+    dataStub.onFirstCall().rejects(new Error('not found'));
     dataStub.onSecondCall().resolves(DEFAULT_STOCK_DATA);
-    sinon.stub(yahoo, 'resolveTicker').resolves({ symbol: 'AAPL', name: 'Apple Inc.' });
+    sinon.stub(provider, 'resolveTicker').resolves({ symbol: 'AAPL', name: 'Apple Inc.' });
 
     const res = await request(app)
       .get('/api/grade/APPLE')
@@ -115,12 +115,12 @@ describe('GET /api/grade/:query', () => {
     expect(res.body.message).to.match(/couldn't find/i);
   });
 
-  it('returns 503 with a friendly message when Yahoo blows up unexpectedly', async () => {
-    // Both Yahoo calls throw, so the outer try/catch fires the 503 path.
+  it('returns 503 with a friendly message when the provider blows up unexpectedly', async () => {
+    // Both provider calls throw, so the outer try/catch fires the 503 path.
     const sinon = require('sinon');
-    const yahoo = require('../../providers/finnhubProvider');
-    sinon.stub(yahoo, 'getStockData').rejects(new Error('connect ETIMEDOUT'));
-    sinon.stub(yahoo, 'resolveTicker').rejects(new Error('connect ETIMEDOUT'));
+    const provider = require('../../providers/finnhubProvider');
+    sinon.stub(provider, 'getStockData').rejects(new Error('connect ETIMEDOUT'));
+    sinon.stub(provider, 'resolveTicker').rejects(new Error('connect ETIMEDOUT'));
 
     const res = await request(app)
       .get('/api/grade/Microsoft')

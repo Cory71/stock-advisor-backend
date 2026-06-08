@@ -37,7 +37,7 @@ async function resolveAndGrade(raw) {
     return cached;
   }
 
-  // Step 3 — fresh grade. If Yahoo doesn't recognise the symbol (because the
+  // Step 3 — fresh grade. If Finnhub doesn't recognise the symbol (because the
   // input only LOOKED like a ticker — e.g. APPLE), fall back to a search.
   let rawData;
   try {
@@ -66,6 +66,8 @@ async function resolveAndGrade(raw) {
       currency: rawData.currency ?? null,
       grade: graded.grade,
       criteria: graded.criteria,
+      reason: graded.reason ?? null,
+      note: graded.note ?? null,
       rawData
     },
     { upsert: true, new: true, setDefaultsOnInsert: true }

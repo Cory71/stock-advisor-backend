@@ -44,6 +44,8 @@ async function seedOne(ticker) {
         currency: rawData.currency ?? null,
         grade: graded.grade,
         criteria: graded.criteria,
+        reason: graded.reason ?? null,
+        note: graded.note ?? null,
         rawData
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }
@@ -65,8 +67,8 @@ async function main() {
   console.log(`Connected.\n`);
 
   console.log(`Seeding ${TICKERS.length} tickers:`);
-  // Run sequentially with a small delay between calls so we look like a
-  // normal user rather than a bot to Yahoo.
+  // Run sequentially with a delay between tickers to stay under Finnhub's
+  // 60-calls-per-minute free-tier limit (each ticker makes 4 parallel calls).
   for (const ticker of TICKERS) {
     await seedOne(ticker);
     // 5 s gap — 4 parallel calls per ticker, stays well under 60 calls/min.

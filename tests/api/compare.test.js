@@ -6,7 +6,7 @@ const sinon = require('sinon');
 const request = require('supertest');
 const app = require('../../server');
 const { connect, disconnect, clearCollections } = require('../helpers/testDb');
-const { installStubs, restore, DEFAULT_STOCK_DATA } = require('../helpers/mockYahoo');
+const { installStubs, restore, DEFAULT_STOCK_DATA } = require('../helpers/mockProvider');
 const { createUserAndToken } = require('../helpers/authToken');
 
 describe('GET /api/compare', () => {
@@ -63,12 +63,12 @@ describe('GET /api/compare', () => {
     // parallel via Promise.allSettled, so call order is non-deterministic.
     // AAPL + MSFT succeed; NOPE throws and the search fallback returns null,
     // so NOPE ends up as the single errored row in the response.
-    const yahoo = require('../../providers/finnhubProvider');
-    const dataStub = sinon.stub(yahoo, 'getStockData');
+    const provider = require('../../providers/finnhubProvider');
+    const dataStub = sinon.stub(provider, 'getStockData');
     dataStub.withArgs('AAPL').resolves(DEFAULT_STOCK_DATA);
     dataStub.withArgs('MSFT').resolves(DEFAULT_STOCK_DATA);
-    dataStub.withArgs('NOPE').rejects(new Error('Yahoo: not found'));
-    sinon.stub(yahoo, 'resolveTicker').resolves(null);
+    dataStub.withArgs('NOPE').rejects(new Error('not found'));
+    sinon.stub(provider, 'resolveTicker').resolves(null);
 
     const res = await request(app)
       .get('/api/compare?tickers=AAPL,MSFT,NOPE')

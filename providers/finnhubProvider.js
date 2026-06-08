@@ -1,6 +1,6 @@
 // Fetches stock fundamentals from Finnhub and shapes them into the input
-// the grading function expects — same exported shape as yahooProvider.js so
-// the routes and tests can swap providers without changing business logic.
+// the grading function expects. Exposes getStockData + resolveTicker behind a
+// thin provider interface, so the routes and tests don't depend on the source.
 //
 // Endpoints used:
 //   /quote                          — current share price
@@ -50,6 +50,17 @@ const REVENUE_CONCEPTS = [
   'RevenuesNetOfInterestExpense',
 ];
 
+// Fallback revenue concept. Used ONLY when none of the standard net-revenue
+// concepts above are present (e.g. refiners like Valero, and Kraft Heinz, which
+// report revenue solely under the "including assessed tax" tag). It is kept
+// separate so companies that report BOTH a net line and this gross line (e.g.
+// tobacco, where the gross figure includes large pass-through excise taxes)
+// still grade on the more accurate net revenue.
+const REVENUE_FALLBACK_CONCEPTS = [
+  'us-gaap_RevenueFromContractWithCustomerIncludingAssessedTax',
+  'RevenueFromContractWithCustomerIncludingAssessedTax',
+];
+
 const OCF_CONCEPTS = [
   'us-gaap_NetCashProvidedByUsedInOperatingActivities',
   'NetCashProvidedByUsedInOperatingActivities',
@@ -69,6 +80,14 @@ const CAPEX_CONCEPTS = [
   'PaymentsToAcquirePropertyPlantAndEquipment',
   'us-gaap_PaymentsToAcquireProductiveAssets',   // NVIDIA and similar
   'PaymentsToAcquireProductiveAssets',
+  'us-gaap_PaymentsToAcquireOtherPropertyPlantAndEquipment',  // Eli Lilly
+  'PaymentsToAcquireOtherPropertyPlantAndEquipment',
+  'us-gaap_PaymentsToAcquireOtherProductiveAssets',           // Verizon
+  'PaymentsToAcquireOtherProductiveAssets',
+  'us-gaap_PaymentsForCapitalImprovements',                   // REITs (e.g. Realty Income)
+  'PaymentsForCapitalImprovements',
+  'us-gaap_PaymentsToAcquireMachineryAndEquipment',           // Dow and other chemicals
+  'PaymentsToAcquireMachineryAndEquipment',
   'us-gaap_CapitalExpendituresIncurringObligation',
   'CapitalExpendituresIncurringObligation',
   'us-gaap_PurchaseOfPropertyPlantAndEquipment',
@@ -76,12 +95,39 @@ const CAPEX_CONCEPTS = [
 ];
 
 // Return the first matching XBRL concept value from an array of { concept, value } items.
+// Used for cash-flow lines, where filers report a single relevant figure.
 function findValue(items, ...concepts) {
   for (const concept of concepts) {
     const found = items.find((i) => i.concept === concept);
     if (found && typeof found.value === 'number') return found.value;
   }
   return null;
+}
+
+// Return the LARGEST value across every matching concept. Used for revenue:
+// some filers (e.g. Pfizer) report a small sub-line under one revenue concept
+// and the consolidated total under another, so picking by priority order can
+// grab the wrong one. Total revenue is always >= any component line, so the
+// maximum is the reliable choice.
+function findMaxValue(items, ...concepts) {
+  let max = null;
+  for (const concept of concepts) {
+    for (const item of items) {
+      if (item.concept === concept && typeof item.value === 'number') {
+        if (max === null || item.value > max) max = item.value;
+      }
+    }
+  }
+  return max;
+}
+
+// Pick a company's total revenue. Prefers the standard net-revenue concepts
+// (largest wins, to skip sub-lines); only if none are present does it fall back
+// to the gross "including assessed tax" concept. See REVENUE_FALLBACK_CONCEPTS.
+function findRevenue(items) {
+  const net = findMaxValue(items, ...REVENUE_CONCEPTS);
+  if (net !== null) return net;
+  return findMaxValue(items, ...REVENUE_FALLBACK_CONCEPTS);
 }
 
 // Make an authenticated GET request to Finnhub. Throws on non-2xx responses.
@@ -108,13 +154,13 @@ function parseAnnualReports(reports) {
     const ic = report.report?.ic ?? [];
     const cf = report.report?.cf ?? [];
 
-    const revenue = findValue(ic, ...REVENUE_CONCEPTS);
+    const revenue = findRevenue(ic);
     const ocf     = findValue(cf, ...OCF_CONCEPTS);
     const capex   = findValue(cf, ...CAPEX_CONCEPTS);
     const fcf     = ocf !== null && capex !== null ? ocf - Math.abs(capex) : null;
 
     if (revenue !== null) {
-      annuals.push({ year: report.year, revenue, fcf });
+      annuals.push({ year: report.year, endDate: report.endDate ?? null, revenue, fcf });
     }
   }
   return annuals.sort((a, b) => a.year - b.year);
@@ -128,7 +174,7 @@ function parseQuarterlyYTD(reports) {
     const ic = report.report?.ic ?? [];
     const cf = report.report?.cf ?? [];
 
-    const revenue = findValue(ic, ...REVENUE_CONCEPTS);
+    const revenue = findRevenue(ic);
     const ocf     = findValue(cf, ...OCF_CONCEPTS);
     const capex   = findValue(cf, ...CAPEX_CONCEPTS);
     const fcf     = ocf !== null && capex !== null ? ocf - Math.abs(capex) : null;
@@ -197,16 +243,21 @@ async function getStockData(ticker) {
   const ttmRevenue      = computeTTM(annualData, quarterlyData, 'revenue');
   const ttmFreeCashFlow = computeTTM(annualData, quarterlyData, 'fcf');
 
-  // The year of the most recent annual report. The grader uses this to detect
-  // stale data (a ticker whose fundamentals belong to a defunct filer).
-  const latestAnnualYear = annualData.length
-    ? annualData[annualData.length - 1].year
-    : null;
+  // The most recent annual report's year and period-end date. The grader uses
+  // these to detect stale data (a ticker whose fundamentals belong to a defunct
+  // filer, or that Finnhub simply hasn't refreshed). The end date is preferred
+  // for precision; the year is a fallback.
+  const latestAnnual = annualData.length ? annualData[annualData.length - 1] : null;
+  const latestAnnualYear = latestAnnual ? latestAnnual.year : null;
+  const latestAnnualEndDate = latestAnnual ? latestAnnual.endDate : null;
 
   // quote.c is the current price; 0 means no data, so treat it as null.
   const price    = typeof quote.c === 'number' && quote.c > 0 ? quote.c : null;
   const currency = profile.currency || null;
   const longName = profile.name    || null;
+  // Finnhub's industry label (e.g. "Real Estate", "Insurance"). The grader uses
+  // it to add a caveat when revenue/FCF is only a rough proxy for the sector.
+  const industry = profile.finnhubIndustry || null;
 
   return {
     annualRevenues,
@@ -214,6 +265,8 @@ async function getStockData(ticker) {
     annualFreeCashFlows,
     ttmFreeCashFlow,
     latestAnnualYear,
+    latestAnnualEndDate,
+    industry,
     longName,
     price,
     currency,

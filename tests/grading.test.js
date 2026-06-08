@@ -132,36 +132,120 @@ describe('gradeStock — N/A handling', () => {
     expect(result.grade).to.equal('N/A');
   });
 
+  it('explains FCF is not computable when revenue exists but FCF is absent (banks/insurers)', () => {
+    const result = gradeStock({
+      annualRevenues:      [100, 110, 120],
+      ttmRevenue:          130,
+      annualFreeCashFlows: [],   // no capex data -> no FCF, like a bank
+      ttmFreeCashFlow:     null
+    });
+    expect(result.grade).to.equal('N/A');
+    expect(result.reason).to.match(/free cash flow/i);
+    expect(result.reason).to.match(/banks|insurers|financial/i);
+  });
+
+  it('uses the generic "not enough data" message when revenue history is too short', () => {
+    const result = gradeStock({
+      annualRevenues:      [100],   // only 1 year of revenue
+      ttmRevenue:          110,
+      annualFreeCashFlows: [],
+      ttmFreeCashFlow:     null
+    });
+    expect(result.grade).to.equal('N/A');
+    expect(result.reason).to.match(/historical data/i);
+  });
+
   it('returns N/A when no data at all', () => {
     const result = gradeStock({});
     expect(result.grade).to.equal('N/A');
   });
 });
 
+describe('gradeStock — sector caveats', () => {
+  it('attaches a REIT caveat when industry is Real Estate', () => {
+    const result = gradeStock({ ...allYesData, industry: 'Real Estate' });
+    expect(result.grade).to.equal('A');
+    expect(result.note).to.match(/REIT|FFO/i);
+  });
+
+  it('attaches an insurance caveat when industry is Insurance', () => {
+    const result = gradeStock({ ...allYesData, industry: 'Insurance' });
+    expect(result.note).to.match(/insur/i);
+  });
+
+  it('attaches a utilities caveat when industry is Utilities', () => {
+    const result = gradeStock({ ...allYesData, industry: 'Utilities' });
+    expect(result.note).to.match(/utilit/i);
+  });
+
+  it('adds no note for an ordinary industry', () => {
+    const result = gradeStock({ ...allYesData, industry: 'Technology' });
+    expect(result.note).to.equal(undefined);
+  });
+
+  it('adds no note when industry is absent', () => {
+    const result = gradeStock(allYesData);
+    expect(result.note).to.equal(undefined);
+  });
+});
+
 describe('gradeStock — stale data guard', () => {
-  // Pass currentYear explicitly so the test doesn't depend on today's date.
-  it('returns N/A when the latest annual report is more than 2 years old', () => {
-    const data = { ...allYesData, latestAnnualYear: 2015 };
-    const result = gradeStock(data, 2026);
+  // Pass `now` explicitly so the tests don't depend on today's date.
+  const now = new Date('2026-06-15');
+
+  // --- date-based path (preferred): measures months from the period-end date ---
+  it('returns N/A when the latest report ended well over 2 years ago', () => {
+    const data = { ...allYesData, latestAnnualEndDate: '2015-12-31 00:00:00' };
+    const result = gradeStock(data, now);
     expect(result.grade).to.equal('N/A');
     expect(result.reason).to.match(/outdated/i);
     expect(result.reason).to.include('2015');
   });
 
-  it('grades normally when the latest annual report is recent', () => {
-    const data = { ...allYesData, latestAnnualYear: 2025 };
-    const result = gradeStock(data, 2026);
+  it('grades normally when the latest report is recent', () => {
+    const data = { ...allYesData, latestAnnualEndDate: '2025-12-31' };
+    const result = gradeStock(data, now);
     expect(result.grade).to.equal('A');
   });
 
-  it('allows data up to 2 years old (boundary)', () => {
+  it('allows data exactly 24 months old (boundary, inclusive)', () => {
+    // 2024-06-30 -> 2026-06-15 is 24 whole months; cutoff is > 24, so it grades.
+    const data = { ...allYesData, latestAnnualEndDate: '2024-06-30' };
+    const result = gradeStock(data, now);
+    expect(result.grade).to.equal('A');
+  });
+
+  it('returns N/A when data is more than 24 months old', () => {
+    // 2024-05-31 -> 2026-06-15 is 25 months.
+    const data = { ...allYesData, latestAnnualEndDate: '2024-05-31' };
+    const result = gradeStock(data, now);
+    expect(result.grade).to.equal('N/A');
+  });
+
+  it('catches off-calendar fiscal years (early-2024 end is stale by mid-2026)', () => {
+    // A report labelled 2024 but ending Jan 2024 is ~29 months old — the
+    // year-based check would have let this through; the date-based one flags it.
+    const data = { ...allYesData, latestAnnualYear: 2024, latestAnnualEndDate: '2024-01-31' };
+    const result = gradeStock(data, now);
+    expect(result.grade).to.equal('N/A');
+  });
+
+  // --- year-based fallback path (when no end date is available) ---
+  it('falls back to the report year when no end date is present', () => {
+    const data = { ...allYesData, latestAnnualYear: 2015 };
+    const result = gradeStock(data, now);
+    expect(result.grade).to.equal('N/A');
+    expect(result.reason).to.include('2015');
+  });
+
+  it('year fallback grades data within 2 years', () => {
     const data = { ...allYesData, latestAnnualYear: 2024 };
-    const result = gradeStock(data, 2026);
+    const result = gradeStock(data, now);
     expect(result.grade).to.equal('A');
   });
 
-  it('skips the guard when latestAnnualYear is absent (backward compatible)', () => {
-    const result = gradeStock(allYesData, 2026);
+  it('skips the guard when no year or end date is present (backward compatible)', () => {
+    const result = gradeStock(allYesData, now);
     expect(result.grade).to.equal('A');
   });
 });

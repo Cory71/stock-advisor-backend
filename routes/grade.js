@@ -1,6 +1,6 @@
 // GET /api/grade/:query
 // `query` can be either a ticker symbol (e.g. "AAPL") or a company name
-// (e.g. "Apple"). The route resolves names to canonical tickers via Yahoo's
+// (e.g. "Apple"). The route resolves names to canonical tickers via Finnhub's
 // search endpoint and caches the result in MongoDB for 24 hours.
 
 const express = require('express');
@@ -39,6 +39,8 @@ function shape(stock, { cached, fallbackName }) {
     currency: stock.currency || null,
     grade: stock.grade,
     criteria: stock.criteria,
+    reason: stock.reason || null,
+    note: stock.note || null,
     rawData: stock.rawData,
     gradedAt: stock.updatedAt,
     cached
@@ -52,7 +54,7 @@ router.get('/:query', verifyToken, async (req, res) => {
     let resolvedName = null;
 
     // If the input doesn't look like a ticker symbol (e.g. "Apple", "Microsoft"),
-    // resolve it to a canonical ticker via Yahoo search before doing anything else.
+    // resolve it to a canonical ticker via Finnhub search before doing anything else.
     if (!TICKER_PATTERN.test(ticker)) {
       const resolved = await finnhubProvider.resolveTicker(raw);
       if (!resolved) {
@@ -89,12 +91,12 @@ router.get('/:query', verifyToken, async (req, res) => {
       return res.json(shape(cached, { cached: true, fallbackName: resolvedName }));
     }
 
-    // Cache miss or stale — fetch fresh data from Yahoo.
+    // Cache miss or stale — fetch fresh data from Finnhub.
     let rawData;
     try {
       rawData = await finnhubProvider.getStockData(ticker);
     } catch (err) {
-      // The input looked like a ticker but Yahoo doesn't recognise it. Last
+      // The input looked like a ticker but Finnhub doesn't recognise it. Last
       // resort: try a search before giving up.
       const fallback = await finnhubProvider.resolveTicker(raw);
       if (!fallback) {
@@ -128,6 +130,8 @@ router.get('/:query', verifyToken, async (req, res) => {
         currency: rawData.currency ?? null,
         grade: graded.grade,
         criteria: graded.criteria,
+        reason: graded.reason ?? null,
+        note: graded.note ?? null,
         rawData
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }
