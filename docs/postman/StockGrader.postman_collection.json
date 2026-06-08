@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "StockGrader API",
-    "description": "Postman collection for the StockGrader backend.\n\nHow to use:\n1. Import this collection and the matching environment file (StockGrader-Local.postman_environment.json).\n2. Pick the 'StockGrader - Local' environment from the dropdown (top right).\n3. Send POST /api/auth/register once to create the user, or POST /api/auth/login if the user already exists. Copy the 'token' value from the response body.\n4. Set the {{token}} environment variable to that value (Environments tab in the left sidebar).\n5. All other requests inherit Authorization: Bearer {{token}} from collection auth, so they just work after the token is set.",
+    "description": "Postman collection for the StockGrader backend.\n\nHow to use:\n1. Import this collection and one of the environment files:\n   - StockGrader-Local (baseUrl http://localhost:5000) for local development, or\n   - StockGrader-Production (the live Render API). Note: the free Render tier sleeps after ~15 min idle, so the first request may take 30-60s to wake.\n2. Pick the matching environment from the dropdown (top right).\n3. Send POST /api/auth/register once to create the user, or POST /api/auth/login if the user already exists. Copy the 'token' value from the response body.\n4. Set the {{token}} environment variable to that value (Environments tab in the left sidebar).\n5. All other requests inherit Authorization: Bearer {{token}} from collection auth, so they just work after the token is set.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
