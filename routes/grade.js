@@ -8,6 +8,7 @@ const verifyToken = require('../middleware/authMiddleware');
 const Stock = require('../models/Stock');
 const SearchHistory = require('../models/SearchHistory');
 const { gradeStock } = require('../lib/grading');
+const { friendlyStockError } = require('../lib/friendlyError');
 // Imported as a namespace (not destructured) so test stubs that swap out
 // `finnhubProvider.getStockData` are actually seen by these route handlers.
 const finnhubProvider = require('../providers/finnhubProvider');
@@ -96,6 +97,12 @@ router.get('/:query', verifyToken, async (req, res) => {
     try {
       rawData = await finnhubProvider.getStockData(ticker);
     } catch (err) {
+      // 403 = the provider doesn't cover this symbol (e.g. a Toronto ".TO"
+      // listing). Searching won't help, so tell the user plainly instead of
+      // falling through to a "temporarily unavailable" message.
+      if (err.status === 403) {
+        return res.status(404).json({ message: friendlyStockError(err, ticker) });
+      }
       // The input looked like a ticker but Finnhub doesn't recognise it. Last
       // resort: try a search before giving up.
       const fallback = await finnhubProvider.resolveTicker(raw);

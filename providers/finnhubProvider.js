@@ -142,7 +142,13 @@ async function finnhubGet(path, params = {}) {
   }
 
   const res = await fetch(url.toString(), { signal: AbortSignal.timeout(15000) });
-  if (!res.ok) throw new Error(`Finnhub returned ${res.status} for ${path}`);
+  if (!res.ok) {
+    // Expose the status so callers can tell "no access to this symbol" (403 —
+    // e.g. a non-US listing outside our plan) from a transient outage.
+    const err = new Error(`Finnhub returned ${res.status} for ${path}`);
+    err.status = res.status;
+    throw err;
+  }
   return res.json();
 }
 
@@ -226,9 +232,9 @@ async function getStockData(ticker) {
     finnhubGet('/stock/financials-reported', { symbol: finSymbol, freq: 'quarterly' }),
   ]);
 
-  // An empty profile means Finnhub doesn't recognise this ticker.
+  // An empty profile means the provider doesn't recognise this ticker.
   if (!profile || !profile.name) {
-    throw new Error(`Finnhub has no data for "${ticker}"`);
+    throw new Error(`No data available for "${ticker}".`);
   }
 
   // Full history is kept for the TTM calculation (it needs the prior year),

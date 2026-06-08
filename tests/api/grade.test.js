@@ -129,4 +129,24 @@ describe('GET /api/grade/:query', () => {
     expect(res.status).to.equal(503);
     expect(res.body.message).to.match(/temporarily unavailable/i);
   });
+
+  it('returns a friendly "U.S.-listed only" message when Finnhub denies access (403)', async () => {
+    // A non-US symbol (e.g. a Toronto ".TO" listing) gets 403 from Finnhub.
+    const sinon = require('sinon');
+    const provider = require('../../providers/finnhubProvider');
+    const denied = new Error('Finnhub returned 403 for /quote');
+    denied.status = 403;
+    sinon.stub(provider, 'getStockData').rejects(denied);
+    const resolveStub = sinon.stub(provider, 'resolveTicker').resolves(null);
+
+    const res = await request(app)
+      .get('/api/grade/SHOP.TO')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).to.equal(404);
+    expect(res.body.message).to.match(/U\.S\.-listed/i);
+    expect(res.body.message).to.include('SHOP.TO');
+    // The 403 short-circuits before the search fallback runs.
+    expect(resolveStub.called).to.equal(false);
+  });
 });

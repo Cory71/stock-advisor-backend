@@ -7,6 +7,7 @@ const verifyToken = require('../middleware/authMiddleware');
 const Stock = require('../models/Stock');
 const SearchHistory = require('../models/SearchHistory');
 const { gradeStock } = require('../lib/grading');
+const { friendlyStockError } = require('../lib/friendlyError');
 const finnhubProvider = require('../providers/finnhubProvider');
 
 const router = express.Router();
@@ -59,6 +60,9 @@ async function gradeOne(query, userId) {
   try {
     rawData = await finnhubProvider.getStockData(ticker);
   } catch (err) {
+    // 403 = symbol the provider doesn't cover (e.g. a ".TO" listing). Re-throw
+    // so the per-ticker message stays the friendly "U.S.-listed only" one.
+    if (err.status === 403) throw err;
     const fallback = await finnhubProvider.resolveTicker(raw);
     if (!fallback) throw new Error(`Couldn't find a stock for "${raw}".`);
     ticker = fallback.symbol;
@@ -123,7 +127,8 @@ router.get('/', verifyToken, async (req, res) => {
     const settled = await Promise.allSettled(queries.map((q) => gradeOne(q, req.user.id)));
     const results = settled.map((r, i) => {
       if (r.status === 'fulfilled') return r.value;
-      return { ticker: queries[i].toUpperCase(), error: r.reason.message };
+      const sym = queries[i].toUpperCase();
+      return { ticker: sym, error: friendlyStockError(r.reason, sym) };
     });
 
     res.json(results);

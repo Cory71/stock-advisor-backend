@@ -6,6 +6,7 @@ const WatchlistItem = require('../models/WatchlistItem');
 const Stock = require('../models/Stock');
 const verifyToken = require('../middleware/authMiddleware');
 const { gradeStock } = require('../lib/grading');
+const { friendlyStockError } = require('../lib/friendlyError');
 const finnhubProvider = require('../providers/finnhubProvider');
 
 const router = express.Router();
@@ -43,6 +44,9 @@ async function resolveAndGrade(raw) {
   try {
     rawData = await finnhubProvider.getStockData(ticker);
   } catch (err) {
+    // 403 = symbol the provider doesn't cover (e.g. a ".TO" listing); re-throw
+    // so the caller can show the friendly "U.S.-listed only" message.
+    if (err.status === 403) throw err;
     const fallback = await finnhubProvider.resolveTicker(raw);
     if (!fallback) throw new Error(`Couldn't find a stock for "${raw}".`);
     ticker = fallback.symbol;
@@ -132,7 +136,7 @@ router.post('/', async (req, res) => {
     try {
       stock = await resolveAndGrade(ticker.trim());
     } catch (err) {
-      return res.status(404).json({ message: err.message });
+      return res.status(404).json({ message: friendlyStockError(err, ticker.trim()) });
     }
 
     // Use the canonical ticker from the resolved stock — not whatever the user
