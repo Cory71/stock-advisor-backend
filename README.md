@@ -150,9 +150,9 @@ npm test
 ```
 
 Spins up an in-memory MongoDB (so your real cluster is never touched), stubs
-the Finnhub provider, and runs all 65 backend tests in ~5 seconds.
+the Finnhub provider, and runs all 68 backend tests in ~5 seconds.
 
-Tests live in `tests/` — 28 unit tests on the pure grading function and 37
+Tests live in `tests/` — 30 unit tests on the pure grading function and 38
 Supertest API tests across the 5 routes.
 
 ### Warming the cache (optional)
@@ -209,6 +209,7 @@ All `/api/*` routes (except `register` and `login`) require a valid JWT in the
 backend/
   server.js                # Express app + Mongo connect + route registration
   lib/grading.js           # Pure 5-criteria grading function (unit-tested)
+  lib/friendlyError.js     # Maps provider errors to user-facing messages
   providers/
     finnhubProvider.js     # Finnhub adapter (getStockData, resolveTicker)
   middleware/
@@ -219,8 +220,8 @@ backend/
   scripts/
     seed-popular.js        # warms the cache with ~10 popular tickers (npm run seed)
   tests/
-    grading.test.js        # 28 unit tests on the pure grading function
-    api/                   # 37 Supertest specs across 5 routes
+    grading.test.js        # 30 unit tests on the pure grading function
+    api/                   # 38 Supertest specs across 5 routes
     helpers/               # in-memory Mongo, JWT helper, Finnhub provider stubs
     setup.js               # mocha --require hook (test env vars)
 ```
@@ -255,3 +256,9 @@ A few details that keep the grades honest:
   expenditure, so free cash flow can't be computed; they return **N/A** with a
   `reason`. REITs, insurers, and utilities that *do* grade carry a `note`
   caveat, because revenue/FCF is only a rough proxy for those business models.
+- **Coverage** — the Finnhub free tier serves U.S.-listed stocks (NYSE/Nasdaq).
+  A non-US symbol (e.g. a Toronto `.TO` listing) returns a clear "U.S.-listed
+  stocks only" message instead of a confusing error.
+- **Friendly errors** — `lib/friendlyError.js` converts provider failures into
+  user-facing messages (no raw HTTP codes or provider names) shared by the
+  grade, compare, and watchlist routes.
