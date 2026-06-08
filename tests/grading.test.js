@@ -109,6 +109,42 @@ describe('gradeStock — individual criteria', () => {
   });
 });
 
+describe('gradeStock — FCF-growth criteria require a positive latest value', () => {
+  // Norwegian Cruise Line-style case: revenue growing, FCF improving but still
+  // deeply negative. "Less negative" must not pass the FCF-growth checks.
+  it('fails FCF-growth criteria 4 & 5 when FCF improved but is still negative', () => {
+    const data = {
+      annualRevenues:      [648, 5000, 9800, 9800],     // strong revenue growth
+      ttmRevenue:          10000,
+      annualFreeCashFlows: [-3200, -2500, -2000, -1200], // shrinking loss, still < 0
+      ttmFreeCashFlow:     -949                           // still < 0
+    };
+    const result = gradeStock(data);
+    const c4 = result.criteria.find((c) => c.name === 'Free cash flow growth (long-term)');
+    const c5 = result.criteria.find((c) => c.name === 'Recent free cash flow growth (TTM)');
+    expect(c4.passed).to.equal(false); // -1200 > -3200 but not > 0
+    expect(c5.passed).to.equal(false); // -949 > -1200 but not > 0
+    // Only the two revenue criteria pass -> score 2 -> D (not B)
+    expect(result.score).to.equal(2);
+    expect(result.grade).to.equal('D');
+  });
+
+  it('passes FCF-growth criteria when FCF grew AND is positive', () => {
+    const data = {
+      annualRevenues:      [100, 110, 120, 130],
+      ttmRevenue:          140,
+      annualFreeCashFlows: [-50, 10, 50, 100],  // crossed into positive and rising
+      ttmFreeCashFlow:     120
+    };
+    const result = gradeStock(data);
+    const c4 = result.criteria.find((c) => c.name === 'Free cash flow growth (long-term)');
+    const c5 = result.criteria.find((c) => c.name === 'Recent free cash flow growth (TTM)');
+    expect(c4.passed).to.equal(true);  // 100 > -50 and 100 > 0
+    expect(c5.passed).to.equal(true);  // 120 > 100 and 120 > 0
+    expect(result.grade).to.equal('A');
+  });
+});
+
 describe('gradeStock — N/A handling', () => {
   it('returns N/A when fewer than 2 annual revenue columns', () => {
     const result = gradeStock({

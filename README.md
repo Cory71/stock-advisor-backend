@@ -233,13 +233,17 @@ letter: **5 = A · 4 = B · 3 = C · 2 = D · 0–1 = F**.
 1. **Topline revenue growth (long-term)** — latest annual revenue > earliest
 2. **Recent revenue growth (TTM)** — trailing-twelve-month revenue > latest annual
 3. **Net positive free cash flow** — most recent FCF > 0
-4. **Free cash flow growth (long-term)** — latest annual FCF > earliest
-5. **Recent FCF growth (TTM)** — TTM FCF > latest annual
+4. **Free cash flow growth (long-term)** — latest annual FCF > earliest **and** latest annual FCF > 0
+5. **Recent FCF growth (TTM)** — TTM FCF > latest annual **and** TTM FCF > 0
 
 A few details that keep the grades honest:
 
 - **Free cash flow** = operating cash flow − capital expenditure. Finnhub reports
   CapEx as a positive amount, so FCF subtracts its magnitude.
+- **FCF growth must be positive** — criteria 4 and 5 pass only if the latest
+  figure beats the prior period *and* is greater than zero. A company that merely
+  shrank a loss (e.g. −$3B → −$1B) is still burning cash, so "less negative"
+  doesn't count as healthy growth.
 - **Consistent window** — only the most recent 5 annual periods are used, so
   "long-term growth" spans the same range for every stock.
 - **TTM** is computed from quarterly (YTD) filings:
