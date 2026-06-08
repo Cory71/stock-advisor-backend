@@ -65,6 +65,26 @@
               "path": ["api", "auth", "me"]
             }
           }
+        },
+        {
+          "name": "POST /api/auth/google",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"credential\": \"PASTE_GOOGLE_ID_TOKEN_HERE\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/google",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "google"]
+            }
+          }
         }
       ]
     },
@@ -128,6 +148,56 @@
               "raw": "{{baseUrl}}/api/grade/AAPL",
               "host": ["{{baseUrl}}"],
               "path": ["api", "grade", "AAPL"]
+            }
+          }
+        },
+        {
+          "name": "GET /api/compare?tickers=AAPL,MSFT,GOOG",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/compare?tickers=AAPL,MSFT,GOOG",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "compare"],
+              "query": [
+                { "key": "tickers", "value": "AAPL,MSFT,GOOG" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "History",
+      "item": [
+        {
+          "name": "GET /api/history",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/history",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "history"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "GET / (health check)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/",
+              "host": ["{{baseUrl}}"],
+              "path": [""]
             }
           }
         }
