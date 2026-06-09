@@ -120,6 +120,40 @@ describe('/api/watchlist', () => {
     });
   });
 
+  describe('POST /api/watchlist/refresh', () => {
+    it('re-grades every row with fresh data and returns the updated list', async () => {
+      const provider = require('../../providers/finnhubProvider');
+
+      // Add a ticker — this grades it once and caches it.
+      await request(app)
+        .post('/api/watchlist')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ ticker: 'AAPL' });
+
+      const callsAfterAdd = provider.getStockData.callCount;
+
+      // Refresh should bypass the cache and re-fetch from the provider.
+      const res = await request(app)
+        .post('/api/watchlist/refresh')
+        .set('Authorization', `Bearer ${token}`);
+
+      expect(res.status).to.equal(200);
+      expect(res.body).to.have.lengthOf(1);
+      expect(res.body[0]).to.include({ ticker: 'AAPL' });
+      expect(res.body[0].currentGrade).to.match(/^[A-F]$/);
+      expect(provider.getStockData.callCount).to.be.greaterThan(callsAfterAdd);
+    });
+
+    it('returns an empty list for a user with no watchlist', async () => {
+      const res = await request(app)
+        .post('/api/watchlist/refresh')
+        .set('Authorization', `Bearer ${token}`);
+
+      expect(res.status).to.equal(200);
+      expect(res.body).to.be.an('array').that.is.empty;
+    });
+  });
+
   describe('DELETE /api/watchlist/:ticker', () => {
     it('removes a ticker from the user\'s watchlist', async () => {
       await request(app)

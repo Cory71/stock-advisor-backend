@@ -60,6 +60,23 @@ describe('GET /api/grade/:query', () => {
     expect(res.body.cached).to.equal(true);
   });
 
+  it('bypasses the cache and re-fetches when ?refresh=1 is passed', async () => {
+    const { stockDataStub } = installStubs();
+
+    // First call writes to the cache.
+    await request(app).get('/api/grade/AAPL').set('Authorization', `Bearer ${token}`);
+
+    // A forced refresh should skip the cache, call the provider again, and
+    // report cached:false so the timestamp updates.
+    const res = await request(app)
+      .get('/api/grade/AAPL?refresh=1')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).to.equal(200);
+    expect(res.body.cached).to.equal(false);
+    expect(stockDataStub.callCount).to.equal(2); // once per request, no cache short-circuit
+  });
+
   it('resolves a company name to the canonical ticker', async () => {
     installStubs({
       resolved: { symbol: 'MSFT', name: 'Microsoft Corporation' },

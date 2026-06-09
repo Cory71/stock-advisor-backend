@@ -21,7 +21,7 @@ router.use(verifyToken);
 // doc. Same flow as routes/grade.js — including the fallback for inputs that
 // match TICKER_PATTERN but aren't real tickers (e.g. "APPLE" → AAPL, "TESLA"
 // → TSLA). Throws an Error when nothing matches; caller turns that into a 404.
-async function resolveAndGrade(raw) {
+async function resolveAndGrade(raw, { forceRefresh = false } = {}) {
   let ticker = raw.toUpperCase();
 
   // Step 1 — long inputs are obviously names; resolve them up front.
@@ -32,9 +32,9 @@ async function resolveAndGrade(raw) {
   }
 
   // Step 2 — cache check. Missing price counts as stale so older pre-price
-  // docs get backfilled on the next add.
+  // docs get backfilled on the next add. A forced refresh skips the cache.
   const cached = await Stock.findOne({ ticker });
-  if (cached && cached.price != null && Date.now() - cached.updatedAt.getTime() < CACHE_TTL_MS) {
+  if (!forceRefresh && cached && cached.price != null && Date.now() - cached.updatedAt.getTime() < CACHE_TTL_MS) {
     return cached;
   }
 
@@ -50,9 +50,10 @@ async function resolveAndGrade(raw) {
     const fallback = await finnhubProvider.resolveTicker(raw);
     if (!fallback) throw new Error(`Couldn't find a stock for "${raw}".`);
     ticker = fallback.symbol;
-    // Re-check cache against the newly resolved ticker before re-fetching.
+    // Re-check cache against the newly resolved ticker before re-fetching
+    // (unless we're forcing a refresh).
     const cachedAfter = await Stock.findOne({ ticker });
-    if (cachedAfter && cachedAfter.price != null && Date.now() - cachedAfter.updatedAt.getTime() < CACHE_TTL_MS) {
+    if (!forceRefresh && cachedAfter && cachedAfter.price != null && Date.now() - cachedAfter.updatedAt.getTime() < CACHE_TTL_MS) {
       return cachedAfter;
     }
     rawData = await finnhubProvider.getStockData(ticker);
@@ -78,43 +79,74 @@ async function resolveAndGrade(raw) {
   );
 }
 
+// Load a user's saved tickers (newest first) and enrich each row with the live
+// grade + company name from the Stock cache, so the page can show
+// upgrades/downgrades since the user added the ticker. Shared by the list and
+// refresh routes.
+async function enrichWatchlist(userId) {
+  const items = await WatchlistItem
+    .find({ userId })
+    .sort({ createdAt: -1 })
+    .lean();
+
+  // One DB query pulls every cached stock the user is watching.
+  const tickers = items.map((item) => item.ticker);
+  const stocks = await Stock
+    .find({ ticker: { $in: tickers } })
+    .select('ticker name grade price currency updatedAt')
+    .lean();
+
+  // Build a quick lookup so we can attach data per row.
+  const stockByTicker = {};
+  for (const stock of stocks) {
+    stockByTicker[stock.ticker] = stock;
+  }
+
+  return items.map((item) => {
+    const stock = stockByTicker[item.ticker];
+    return {
+      ...item,
+      name: stock?.name || null,
+      currentGrade: stock?.grade || null,
+      price: stock?.price ?? null,
+      currency: stock?.currency || null,
+      gradedAt: stock?.updatedAt || null
+    };
+  });
+}
+
 // GET /api/watchlist
-// Returns the current user's saved tickers, newest first. Each row is enriched
-// with the live grade + company name from the Stock cache so the page can show
-// upgrades/downgrades since the user added the ticker.
+// Returns the current user's saved tickers, newest first.
 router.get('/', async (req, res) => {
+  try {
+    res.json(await enrichWatchlist(req.user.id));
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
+// POST /api/watchlist/refresh
+// Forces a fresh re-grade of every ticker in the watchlist (bypassing the
+// cache), then returns the updated list. Tickers are refreshed one at a time
+// to stay within Finnhub's rate limit; a single failing ticker is skipped so
+// the rest of the list still refreshes.
+router.post('/refresh', async (req, res) => {
   try {
     const items = await WatchlistItem
       .find({ userId: req.user.id })
-      .sort({ createdAt: -1 })
+      .select('ticker')
       .lean();
 
-    // One DB query pulls every cached stock the user is watching.
-    const tickers = items.map((item) => item.ticker);
-    const stocks = await Stock
-      .find({ ticker: { $in: tickers } })
-      .select('ticker name grade price currency updatedAt')
-      .lean();
-
-    // Build a quick lookup so we can attach data per row.
-    const stockByTicker = {};
-    for (const stock of stocks) {
-      stockByTicker[stock.ticker] = stock;
+    for (const item of items) {
+      try {
+        await resolveAndGrade(item.ticker, { forceRefresh: true });
+      } catch {
+        // Skip tickers that can't be re-graded right now (e.g. a delisted
+        // symbol or a transient provider error) — the rest still refresh.
+      }
     }
 
-    const enriched = items.map((item) => {
-      const stock = stockByTicker[item.ticker];
-      return {
-        ...item,
-        name: stock?.name || null,
-        currentGrade: stock?.grade || null,
-        price: stock?.price ?? null,
-        currency: stock?.currency || null,
-        gradedAt: stock?.updatedAt || null
-      };
-    });
-
-    res.json(enriched);
+    res.json(await enrichWatchlist(req.user.id));
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });
   }

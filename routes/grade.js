@@ -67,12 +67,17 @@ router.get('/:query', verifyToken, async (req, res) => {
       resolvedName = resolved.name;
     }
 
+    // `?refresh=1` lets the user force a fresh re-grade from the grade page,
+    // skipping the cache so the data and timestamp update on demand.
+    const forceRefresh = req.query.refresh === '1' || req.query.refresh === 'true';
+
     // Try the cache first — same canonical ticker, same grade.
     // Cache is considered stale if it's older than the TTL, OR if it's missing
     // a price (older records from before the price field existed). Forcing a
     // re-grade is the simplest way to backfill price on legacy docs.
     const cached = await Stock.findOne({ ticker });
-    const isFresh = cached
+    const isFresh = !forceRefresh
+      && cached
       && cached.price != null
       && Date.now() - cached.updatedAt.getTime() < CACHE_TTL_MS;
 
@@ -113,9 +118,10 @@ router.get('/:query', verifyToken, async (req, res) => {
       }
       ticker = fallback.symbol;
       resolvedName = fallback.name;
-      // Re-check cache with the resolved ticker before fetching again.
+      // Re-check cache with the resolved ticker before fetching again
+      // (unless the user asked for a forced refresh).
       const cachedAfter = await Stock.findOne({ ticker });
-      if (cachedAfter && cachedAfter.price != null && Date.now() - cachedAfter.updatedAt.getTime() < CACHE_TTL_MS) {
+      if (!forceRefresh && cachedAfter && cachedAfter.price != null && Date.now() - cachedAfter.updatedAt.getTime() < CACHE_TTL_MS) {
         await recordHistory(req.user.id, ticker);
         return res.json(shape(cachedAfter, { cached: true, fallbackName: resolvedName }));
       }
