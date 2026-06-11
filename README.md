@@ -10,6 +10,28 @@ Express REST API for StockGrader, a web app that grades publicly traded stocks A
 > Hosted on Render's free tier — first request after ~15 min of idle may take
 > 30–60 seconds to wake the server. After it wakes up it's snappy.
 
+## Features
+
+- **Stock grading** — grades any U.S.-listed stock A–F on five fundamental criteria (revenue growth and free-cash-flow health) from Finnhub financial statements.
+- **Ticker or company-name lookup** — resolves names to canonical tickers (e.g. "Google" → `GOOGL`), preferring the U.S. listing over foreign ones.
+- **Authentication** — email/password (bcrypt + JWT) and Google sign-in.
+- **Watchlist** — per-user saved tickers with a grade-at-add snapshot and a bulk refresh endpoint.
+- **Compare** — grade 2–3 stocks in a single request.
+- **Search history** — records each user's recent lookups.
+- **24-hour caching** in MongoDB to stay within Finnhub's rate limit, with on-demand refresh.
+- **Honest N/A + sector caveats** — banks/insurers return N/A; REITs and utilities carry a caveat where free cash flow is only a rough proxy.
+- **Friendly errors** — no raw HTTP codes or provider names reach the user.
+
+## Technologies Used
+
+- [Node.js](https://nodejs.org/) + [Express](https://expressjs.com/) — REST API
+- [MongoDB](https://www.mongodb.com/) + [Mongoose](https://mongoosejs.com/) — database and models
+- [JWT](https://github.com/auth0/node-jsonwebtoken) + [Passport](https://www.passportjs.org/) (`passport-jwt`) + [bcryptjs](https://github.com/dcodeIO/bcrypt.js) — authentication
+- [google-auth-library](https://github.com/googleapis/google-auth-library-nodejs) — Google sign-in verification
+- [Finnhub API](https://finnhub.io/) — live quotes and financial statements
+- [Mocha](https://mochajs.org/) + [Chai](https://www.chaijs.com/) + [Supertest](https://github.com/ladjs/supertest) + [Sinon](https://sinonjs.org/) + [mongodb-memory-server](https://github.com/typegoose/mongodb-memory-server) — testing
+- Hosted on [Render](https://render.com/) with [MongoDB Atlas](https://www.mongodb.com/atlas); frontend on [Vercel](https://vercel.com/)
+
 ## Prerequisites
 
 - **[Node.js 20](https://nodejs.org/) or newer** (the data provider uses the built-in global `fetch`, stable since Node 18; 20+ is recommended to match the frontend's Vite).
@@ -150,10 +172,11 @@ npm test
 ```
 
 Spins up an in-memory MongoDB (so your real cluster is never touched), stubs
-the Finnhub provider, and runs all 68 backend tests in ~5 seconds.
+the Finnhub provider, and runs all 80 backend tests in ~5 seconds.
 
-Tests live in `tests/` — 30 unit tests on the pure grading function and 38
-Supertest API tests across the 5 routes.
+Tests live in `tests/` — 30 unit tests on the pure grading function, 41
+Supertest API tests across the 5 routes, and 9 provider tests for name
+resolution (common-name aliases + the U.S.-listing preference).
 
 ### Warming the cache (optional)
 
@@ -189,11 +212,12 @@ All `/api/*` routes (except `register` and `login`) require a valid JWT in the
 | POST | `/api/auth/login` | Verify email/password; returns a signed JWT |
 | POST | `/api/auth/google` | Verify a Google ID token; find-or-create the user and return a signed JWT |
 | GET | `/api/auth/me` | Return the current user |
-| GET | `/api/grade/:query` | Grade a stock by ticker **or company name** (resolves names via Finnhub search; caches 24h) |
+| GET | `/api/grade/:query` | Grade a stock by ticker **or company name** (resolves names via Finnhub search; caches 24h). Add `?refresh=1` to bypass the cache and force a fresh re-grade |
 | GET | `/api/compare?tickers=A,B,C` | Grade 2 or 3 tickers/names in parallel |
 | GET | `/api/history` | User's last 20 lookups, enriched with company name |
 | GET | `/api/watchlist` | User's watchlist, enriched with name, current grade, last price, currency |
 | POST | `/api/watchlist` | Add a ticker/name; freezes current grade as `gradeAtAdd` |
+| POST | `/api/watchlist/refresh` | Force a fresh re-grade of every saved ticker (cache-bypassed), then return the updated list |
 | DELETE | `/api/watchlist/:ticker` | Remove a ticker |
 
 ## Data Models
@@ -221,7 +245,8 @@ backend/
     seed-popular.js        # warms the cache with ~10 popular tickers (npm run seed)
   tests/
     grading.test.js        # 30 unit tests on the pure grading function
-    api/                   # 38 Supertest specs across 5 routes
+    api/                   # 41 Supertest specs across 5 routes
+    providers/             # 9 unit tests for name resolution (aliases + US-listing)
     helpers/               # in-memory Mongo, JWT helper, Finnhub provider stubs
     setup.js               # mocha --require hook (test env vars)
 ```
@@ -262,3 +287,11 @@ A few details that keep the grades honest:
 - **Friendly errors** — `lib/friendlyError.js` converts provider failures into
   user-facing messages (no raw HTTP codes or provider names) shared by the
   grade, compare, and watchlist routes.
+
+## Future Improvements
+
+- **Scheduled re-grading** of cached stocks (e.g. a nightly job) so popular tickers stay fresh without a manual refresh.
+- **Sector-relative grading** — compare a stock against its industry peers, not just absolute thresholds.
+- **Broader coverage** — add a paid data source (or fallback) to grade non-US listings and ADRs.
+- **Queue / rate-limit handling** for large watchlist refreshes.
+- **Grade-change notifications** (email or webhook) when a watched stock's grade moves.

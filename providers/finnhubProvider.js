@@ -34,6 +34,17 @@ const FINANCIALS_SYMBOL_ALIASES = {
   GOOG: 'GOOGL',
 };
 
+// Finnhub's search indexes companies by their legal name, so the everyday name
+// people type doesn't match (searching "Google" returns nothing — it's listed
+// as "Alphabet"; "Facebook" is listed as "Meta"). Map those common names
+// straight to the canonical ticker so a name search still works.
+const NAME_ALIASES = {
+  GOOGLE: 'GOOGL',
+  FACEBOOK: 'META',
+  SNAPCHAT: 'SNAP',
+  MCDONALDS: 'MCD',
+};
+
 // Finnhub XBRL concepts vary by company: some file with a "us-gaap_" prefix
 // (e.g. Apple), others use bare names (e.g. Alphabet/Google). List both forms
 // so the same code works across different filers.
@@ -281,11 +292,35 @@ async function getStockData(ticker) {
 
 // Resolve a user query (company name or partial ticker) to { symbol, name }.
 // Returns null when no common-stock match is found.
-async function resolveTicker(query) {
-  const data  = await finnhubGet('/search', { q: query });
-  const match = data.result?.find((r) => r.type === 'Common Stock');
-  if (!match) return null;
+// A U.S.-listed symbol is plain letters, optionally with a single-letter share
+// class (AAPL, NKE, BRK.A). Foreign listings carry a 2+ letter exchange suffix
+// or digits (NIKE.WA, VISA.RO, 402340.KS). The Finnhub free tier only covers
+// U.S. stocks, so a foreign symbol would 403 when we try to grade it.
+function isUsListing(symbol) {
+  return /^[A-Z]+(\.[A-Z])?$/.test(symbol);
+}
+
+// Pick the best symbol from Finnhub /search results. Finnhub mixes foreign
+// listings in (and often returns them first — e.g. "Nike" lists NIKE.WA before
+// NKE), so prefer the first U.S.-listed common stock, falling back to the first
+// common stock when none look U.S.-listed. Returns null when there's no match.
+// Exported for unit testing.
+function pickResolvedSymbol(results) {
+  const stocks = (results || []).filter((r) => r.type === 'Common Stock');
+  if (stocks.length === 0) return null;
+  const match = stocks.find((r) => isUsListing(r.symbol)) || stocks[0];
   return { symbol: match.symbol, name: match.description || null };
 }
 
-module.exports = { getStockData, resolveTicker };
+async function resolveTicker(query) {
+  // Common-name shortcut: "Google" → GOOGL, "Facebook" → META, etc. These don't
+  // match Finnhub's search (it indexes the legal name), so resolve them
+  // directly. The real company name gets filled in later from the profile.
+  const alias = NAME_ALIASES[query.trim().toUpperCase()];
+  if (alias) return { symbol: alias, name: null };
+
+  const data = await finnhubGet('/search', { q: query });
+  return pickResolvedSymbol(data.result);
+}
+
+module.exports = { getStockData, resolveTicker, pickResolvedSymbol };
