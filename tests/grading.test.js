@@ -168,16 +168,31 @@ describe('gradeStock — N/A handling', () => {
     expect(result.grade).to.equal('N/A');
   });
 
-  it('explains FCF is not computable when revenue exists but FCF is absent (banks/insurers)', () => {
+  it('explains FCF is not computable when revenue exists but FCF is absent', () => {
     const result = gradeStock({
       annualRevenues:      [100, 110, 120],
       ttmRevenue:          130,
-      annualFreeCashFlows: [],   // no capex data -> no FCF, like a bank
+      annualFreeCashFlows: [],   // no capex data we can read -> no FCF
       ttmFreeCashFlow:     null
     });
     expect(result.grade).to.equal('N/A');
     expect(result.reason).to.match(/free cash flow/i);
-    expect(result.reason).to.match(/banks|insurers|financial/i);
+    expect(result.reason).to.match(/banks|insurers/i);
+  });
+
+  // This path is not only reached by financial firms. REITs (NNN), utilities
+  // (NEE), and smaller filers land here too, because they tag capital spending
+  // with a company-specific XBRL concept rather than a standard us-gaap one.
+  // The wording must not tell those companies they are banks.
+  it('does not claim the company is a financial firm', () => {
+    const result = gradeStock({
+      annualRevenues:      [100, 110, 120],
+      ttmRevenue:          130,
+      annualFreeCashFlows: [],
+      ttmFreeCashFlow:     null
+    });
+    expect(result.reason).to.match(/REITs|utilities/i);
+    expect(result.reason).not.to.match(/other financial firms/i);
   });
 
   it('uses the generic "not enough data" message when revenue history is too short', () => {
