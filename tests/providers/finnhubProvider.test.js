@@ -159,3 +159,60 @@ describe('parseAnnualReports — combined filings (one report per registrant)', 
     expect(parsed[1].fcf).to.equal(111_000);
   });
 });
+
+// --- Per-company capital expenditure ------------------------------------
+// A few filers report no consolidated capex line, only segment lines under
+// their own XBRL prefix. NextEra splits it between Florida Power & Light and
+// its clean-energy arm; using only one of them roughly halves the total and
+// flips free cash flow from negative to positive.
+const { findCapex } = require('../../providers/finnhubProvider');
+
+const NEE_FPL  = 'nee_CapitalExpendituresOfFPL';
+const NEE_NEER = 'nee_IndependentPowerInvestments';
+const NEE_OTHER = 'nee_OtherCapitalExpenditures';
+
+describe('findCapex — per-company segment capex', () => {
+  it('sums NextEra\'s segment lines into one total', () => {
+    const cf = [
+      { concept: NEE_FPL,   value:  8_720_000_000 },
+      { concept: NEE_NEER,  value: 15_330_000_000 },
+      { concept: NEE_OTHER, value:              0 },
+    ];
+    expect(findCapex(cf, 'NEE')).to.equal(24_050_000_000);
+  });
+
+  it('returns null when a required segment is missing (NextEra 2021)', () => {
+    // The 2021 filing has no FPL line. Adding up what remains would understate
+    // capex by ~$9B and invent an improving free-cash-flow trend.
+    const cf = [
+      { concept: NEE_NEER,  value: 8_250_000_000 },
+      { concept: NEE_OTHER, value:   150_000_000 },
+    ];
+    expect(findCapex(cf, 'NEE')).to.equal(null);
+  });
+
+  it('ignores the duplicate label NextEra reports for the same money', () => {
+    // nee_CapitalExpendituresOfPublicUtility repeats the FPL figure. It is not
+    // in `parts`, so it must not be added a second time.
+    const cf = [
+      { concept: NEE_FPL,  value:  8_720_000_000 },
+      { concept: NEE_NEER, value: 15_330_000_000 },
+      { concept: 'nee_CapitalExpendituresOfPublicUtility', value: 8_720_000_000 },
+    ];
+    expect(findCapex(cf, 'NEE')).to.equal(24_050_000_000);
+  });
+
+  it('prefers a standard concept when the filer reports one', () => {
+    const cf = [
+      { concept: 'us-gaap_PaymentsToAcquirePropertyPlantAndEquipment', value: 5_000 },
+      { concept: NEE_FPL,  value: 999 },
+      { concept: NEE_NEER, value: 999 },
+    ];
+    expect(findCapex(cf, 'NEE')).to.equal(5_000);
+  });
+
+  it('returns null for a company with no rule and no standard concept', () => {
+    expect(findCapex([{ concept: 'foo_Something', value: 1 }], 'AAPL')).to.equal(null);
+    expect(findCapex([{ concept: 'foo_Something', value: 1 }], null)).to.equal(null);
+  });
+});

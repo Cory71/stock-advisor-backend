@@ -87,6 +87,33 @@ const OCF_CONCEPTS = [
   'NetCashProvidedByUsedInOperatingActivitiesContinuingOperations',
 ];
 
+// A few companies report no single consolidated capital-expenditure line —
+// they split spending across segment concepts under their own XBRL prefix, so
+// none of CAPEX_CONCEPTS below match and the stock can't be graded at all.
+//
+// Each entry lists the parts to add together, plus the parts that MUST be
+// present for the total to be trustworthy. NextEra, for example, splits capex
+// between Florida Power & Light and its clean-energy arm; its 2021 filing omits
+// the FPL line, and adding up what's left would understate that year by roughly
+// $9B and invent an improving trend. When a required part is missing we return
+// null so the year is skipped instead of silently wrong.
+//
+// Keep this small and evidence-based: only add a company after checking which
+// concepts it actually reports, across every year. Note that a filer may label
+// the same money twice (NextEra reports nee_CapitalExpendituresOfPublicUtility
+// with the identical value as nee_CapitalExpendituresOfFPL), so parts must be
+// chosen deliberately rather than pattern-matched, or the total double-counts.
+const COMPANY_CAPEX_CONCEPTS = {
+  NEE: {
+    parts: [
+      'nee_CapitalExpendituresOfFPL',        // regulated utility (Florida Power & Light)
+      'nee_IndependentPowerInvestments',     // NextEra Energy Resources (clean energy)
+      'nee_OtherCapitalExpenditures',
+    ],
+    required: ['nee_CapitalExpendituresOfFPL', 'nee_IndependentPowerInvestments'],
+  },
+};
+
 // Capital expenditure concepts. Finnhub reports the payment as a positive
 // number (the outflow magnitude), so free cash flow subtracts it:
 //   FCF = OCF - |CapEx|
@@ -147,6 +174,33 @@ function findRevenue(items) {
   return findMaxValue(items, ...REVENUE_FALLBACK_CONCEPTS);
 }
 
+// Add up a company's segment capex lines. Returns null when any required part
+// is missing, so a partial total never reaches the grader. See the notes on
+// COMPANY_CAPEX_CONCEPTS for why a missing part must not be treated as zero.
+function findCompanyCapex(items, symbol) {
+  const rule = COMPANY_CAPEX_CONCEPTS[symbol];
+  if (!rule) return null;
+
+  for (const concept of rule.required) {
+    if (findValue(items, concept) === null) return null;
+  }
+
+  let total = null;
+  for (const concept of rule.parts) {
+    const value = findValue(items, concept);
+    if (value !== null) total = (total ?? 0) + Math.abs(value);
+  }
+  return total;
+}
+
+// Pick a company's capital expenditure. Standard concepts first; only if none
+// match do we fall back to the per-company segment rules.
+function findCapex(items, symbol) {
+  const standard = findValue(items, ...CAPEX_CONCEPTS);
+  if (standard !== null) return standard;
+  return findCompanyCapex(items, symbol);
+}
+
 // Make an authenticated GET request to Finnhub. Throws on non-2xx responses.
 async function finnhubGet(path, params = {}) {
   const key = process.env.FINNHUB_API_KEY;
@@ -180,7 +234,7 @@ async function finnhubGet(path, params = {}) {
 // one report per year — the largest revenue, which is the parent's consolidated
 // figure — and take its cash-flow numbers too, so revenue and free cash flow
 // always come from the same filing.
-function parseAnnualReports(reports) {
+function parseAnnualReports(reports, symbol = null) {
   const bestByYear = new Map();
 
   for (const report of reports) {
@@ -191,7 +245,7 @@ function parseAnnualReports(reports) {
     if (revenue === null) continue;
 
     const ocf   = findValue(cf, ...OCF_CONCEPTS);
-    const capex = findValue(cf, ...CAPEX_CONCEPTS);
+    const capex = findCapex(cf, symbol);
     const fcf   = ocf !== null && capex !== null ? ocf - Math.abs(capex) : null;
 
     const existing = bestByYear.get(report.year);
@@ -210,7 +264,7 @@ function parseAnnualReports(reports) {
 
 // Parse 10-Q quarterly reports into { year, quarter, revenue, fcf } objects.
 // Values here are cumulative YTD — used only for TTM calculation.
-function parseQuarterlyYTD(reports) {
+function parseQuarterlyYTD(reports, symbol = null) {
   const quarters = [];
   for (const report of reports) {
     const ic = report.report?.ic ?? [];
@@ -218,7 +272,7 @@ function parseQuarterlyYTD(reports) {
 
     const revenue = findRevenue(ic);
     const ocf     = findValue(cf, ...OCF_CONCEPTS);
-    const capex   = findValue(cf, ...CAPEX_CONCEPTS);
+    const capex   = findCapex(cf, symbol);
     const fcf     = ocf !== null && capex !== null ? ocf - Math.abs(capex) : null;
 
     if (revenue !== null) {
@@ -275,8 +329,8 @@ async function getStockData(ticker) {
 
   // Full history is kept for the TTM calculation (it needs the prior year),
   // but the graded arrays are capped to the most recent few years.
-  const annualData    = parseAnnualReports(annualFin.data ?? []);
-  const quarterlyData = parseQuarterlyYTD(quarterlyFin.data ?? []);
+  const annualData    = parseAnnualReports(annualFin.data ?? [], finSymbol);
+  const quarterlyData = parseQuarterlyYTD(quarterlyFin.data ?? [], finSymbol);
   const recentAnnual  = annualData.slice(-ANNUAL_LOOKBACK_YEARS);
 
   const annualRevenues      = recentAnnual.map((a) => a.revenue);
@@ -348,4 +402,4 @@ async function resolveTicker(query) {
   return pickResolvedSymbol(data.result);
 }
 
-module.exports = { getStockData, resolveTicker, pickResolvedSymbol, parseAnnualReports };
+module.exports = { getStockData, resolveTicker, pickResolvedSymbol, parseAnnualReports, findCapex };
