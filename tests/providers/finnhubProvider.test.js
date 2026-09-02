@@ -67,3 +67,95 @@ describe('finnhubProvider.pickResolvedSymbol — prefers U.S. listings', () => {
     expect(pickResolvedSymbol([{ symbol: 'X.L', type: 'ETP' }])).to.equal(null);
   });
 });
+
+// --- Annual report parsing -------------------------------------------------
+// Two bugs found while re-grading Duke Energy (DUK), which returned five
+// identical revenue values and a "latest annual" of 2016 despite Finnhub
+// carrying a 2025 10-K:
+//   1. Regulated utilities report revenue under concepts the list didn't cover.
+//   2. Companies filing a combined 10-K (parent + subsidiary registrants) get
+//      one Finnhub report per registrant, so the same year appeared many times.
+const { parseAnnualReports } = require('../../providers/finnhubProvider');
+
+// Build a minimal Finnhub-shaped annual report.
+function makeReport(year, incomeLines, cashFlowLines = []) {
+  return {
+    year,
+    endDate: `${year}-12-31 00:00:00`,
+    report: { ic: incomeLines, cf: cashFlowLines }
+  };
+}
+
+// Standard operating cash flow + capex lines, so fcf = ocf - |capex|.
+function cashFlow(ocf, capex) {
+  return [
+    { concept: 'us-gaap_NetCashProvidedByUsedInOperatingActivities', value: ocf },
+    { concept: 'us-gaap_PaymentsToAcquirePropertyPlantAndEquipment', value: capex }
+  ];
+}
+
+describe('parseAnnualReports — regulated utility revenue concepts', () => {
+  it('reads revenue from RegulatedAndUnregulatedOperatingRevenue (Duke Energy)', () => {
+    const reports = [
+      makeReport(2025, [
+        { concept: 'us-gaap_RegulatedOperatingRevenueElectricNonNuclear', value: 29_060_000_000 },
+        { concept: 'us-gaap_RegulatedOperatingRevenueGas',               value:  2_870_000_000 },
+        { concept: 'us-gaap_UnregulatedOperatingRevenue',                value:    310_000_000 },
+        { concept: 'us-gaap_RegulatedAndUnregulatedOperatingRevenue',    value: 32_240_000_000 }
+      ])
+    ];
+    const parsed = parseAnnualReports(reports);
+    expect(parsed).to.have.lengthOf(1);
+    // The consolidated total, not one of the component lines.
+    expect(parsed[0].revenue).to.equal(32_240_000_000);
+  });
+
+  it('still ignores a utility year that reports no revenue at all', () => {
+    const reports = [makeReport(2025, [{ concept: 'us-gaap_SomethingElse', value: 1 }])];
+    expect(parseAnnualReports(reports)).to.have.lengthOf(0);
+  });
+});
+
+describe('parseAnnualReports — combined filings (one report per registrant)', () => {
+  it('collapses duplicate years into a single entry', () => {
+    const reports = [
+      makeReport(2024, [{ concept: 'us-gaap_Revenues', value: 30_000_000_000 }]),  // parent
+      makeReport(2024, [{ concept: 'us-gaap_Revenues', value:  9_000_000_000 }]),  // subsidiary
+      makeReport(2024, [{ concept: 'us-gaap_Revenues', value:  4_000_000_000 }]),  // subsidiary
+      makeReport(2023, [{ concept: 'us-gaap_Revenues', value: 28_000_000_000 }])
+    ];
+    const parsed = parseAnnualReports(reports);
+    expect(parsed.map((a) => a.year)).to.deep.equal([2023, 2024]);
+  });
+
+  it('keeps the parent (largest) revenue for a duplicated year', () => {
+    const reports = [
+      makeReport(2024, [{ concept: 'us-gaap_Revenues', value:  9_000_000_000 }]),
+      makeReport(2024, [{ concept: 'us-gaap_Revenues', value: 30_000_000_000 }]),
+      makeReport(2024, [{ concept: 'us-gaap_Revenues', value:  4_000_000_000 }])
+    ];
+    expect(parseAnnualReports(reports)[0].revenue).to.equal(30_000_000_000);
+  });
+
+  it('takes free cash flow from the same report the revenue came from', () => {
+    const reports = [
+      // Subsidiary: smaller revenue, distinctive FCF that must NOT be picked.
+      makeReport(2024, [{ concept: 'us-gaap_Revenues', value: 9_000_000_000 }], cashFlow(999, 0)),
+      // Parent: largest revenue — its FCF is the one that should survive.
+      makeReport(2024, [{ concept: 'us-gaap_Revenues', value: 30_000_000_000 }], cashFlow(5_000, 1_000))
+    ];
+    const parsed = parseAnnualReports(reports);
+    expect(parsed[0].revenue).to.equal(30_000_000_000);
+    expect(parsed[0].fcf).to.equal(4_000);   // 5000 - |1000|, from the parent report
+  });
+
+  it('leaves single-report years untouched (Apple, Exxon and similar)', () => {
+    const reports = [
+      makeReport(2023, [{ concept: 'us-gaap_Revenues', value: 380_000_000_000 }], cashFlow(110_000, 10_000)),
+      makeReport(2024, [{ concept: 'us-gaap_Revenues', value: 391_000_000_000 }], cashFlow(120_000, 9_000)),
+    ];
+    const parsed = parseAnnualReports(reports);
+    expect(parsed.map((a) => a.revenue)).to.deep.equal([380_000_000_000, 391_000_000_000]);
+    expect(parsed[1].fcf).to.equal(111_000);
+  });
+});

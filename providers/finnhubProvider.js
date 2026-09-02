@@ -59,6 +59,12 @@ const REVENUE_CONCEPTS = [
   'NetRevenues',
   'us-gaap_RevenuesNetOfInterestExpense',
   'RevenuesNetOfInterestExpense',
+  // Regulated utilities (e.g. Duke Energy) report no standard revenue line at
+  // all — only this consolidated operating-revenue concept. Without it their
+  // recent filings parse as "no revenue", which made the whole company look
+  // like it stopped reporting years ago.
+  'us-gaap_RegulatedAndUnregulatedOperatingRevenue',
+  'RegulatedAndUnregulatedOperatingRevenue',
 ];
 
 // Fallback revenue concept. Used ONLY when none of the standard net-revenue
@@ -165,22 +171,41 @@ async function finnhubGet(path, params = {}) {
 
 // Parse 10-K annual reports into { year, revenue, fcf } objects, sorted oldest → newest.
 // Annual filings are full-year totals — no YTD de-cumulation needed.
+//
+// Some companies file a *combined* 10-K covering the parent plus its subsidiary
+// registrants (common for utilities: Duke, AEP, Southern, Dominion). Finnhub
+// returns one report per registrant, so the same year arrives several times.
+// Keeping them all made "5 annual values" really mean 5 rows of one year, so
+// long-term growth compared a year against itself and always failed. We keep
+// one report per year — the largest revenue, which is the parent's consolidated
+// figure — and take its cash-flow numbers too, so revenue and free cash flow
+// always come from the same filing.
 function parseAnnualReports(reports) {
-  const annuals = [];
+  const bestByYear = new Map();
+
   for (const report of reports) {
     const ic = report.report?.ic ?? [];
     const cf = report.report?.cf ?? [];
 
     const revenue = findRevenue(ic);
-    const ocf     = findValue(cf, ...OCF_CONCEPTS);
-    const capex   = findValue(cf, ...CAPEX_CONCEPTS);
-    const fcf     = ocf !== null && capex !== null ? ocf - Math.abs(capex) : null;
+    if (revenue === null) continue;
 
-    if (revenue !== null) {
-      annuals.push({ year: report.year, endDate: report.endDate ?? null, revenue, fcf });
+    const ocf   = findValue(cf, ...OCF_CONCEPTS);
+    const capex = findValue(cf, ...CAPEX_CONCEPTS);
+    const fcf   = ocf !== null && capex !== null ? ocf - Math.abs(capex) : null;
+
+    const existing = bestByYear.get(report.year);
+    if (!existing || revenue > existing.revenue) {
+      bestByYear.set(report.year, {
+        year: report.year,
+        endDate: report.endDate ?? null,
+        revenue,
+        fcf
+      });
     }
   }
-  return annuals.sort((a, b) => a.year - b.year);
+
+  return [...bestByYear.values()].sort((a, b) => a.year - b.year);
 }
 
 // Parse 10-Q quarterly reports into { year, quarter, revenue, fcf } objects.
@@ -323,4 +348,4 @@ async function resolveTicker(query) {
   return pickResolvedSymbol(data.result);
 }
 
-module.exports = { getStockData, resolveTicker, pickResolvedSymbol };
+module.exports = { getStockData, resolveTicker, pickResolvedSymbol, parseAnnualReports };
