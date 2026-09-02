@@ -336,6 +336,15 @@ async function getStockData(ticker) {
   const annualRevenues      = recentAnnual.map((a) => a.revenue);
   const annualFreeCashFlows = recentAnnual.filter((a) => a.fcf !== null).map((a) => a.fcf);
 
+  // Which year each value above belongs to. Two arrays are needed because the
+  // free-cash-flow list skips years with no usable CapEx, so it can be shorter
+  // than the revenue list (NVIDIA has 5 revenue years but only 3 FCF years).
+  // Without these, a chart pairing the two lists by position would plot cash
+  // flow against the wrong years. These are additive — the value arrays above
+  // keep their exact shape, so grading is unaffected.
+  const annualYears    = recentAnnual.map((a) => a.year);
+  const annualFcfYears = recentAnnual.filter((a) => a.fcf !== null).map((a) => a.year);
+
   const ttmRevenue      = computeTTM(annualData, quarterlyData, 'revenue');
   const ttmFreeCashFlow = computeTTM(annualData, quarterlyData, 'fcf');
 
@@ -360,6 +369,8 @@ async function getStockData(ticker) {
     ttmRevenue,
     annualFreeCashFlows,
     ttmFreeCashFlow,
+    annualYears,
+    annualFcfYears,
     latestAnnualYear,
     latestAnnualEndDate,
     industry,
