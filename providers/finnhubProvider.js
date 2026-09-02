@@ -262,6 +262,23 @@ function parseAnnualReports(reports, symbol = null) {
   return [...bestByYear.values()].sort((a, b) => a.year - b.year);
 }
 
+// Keep only the reports inside the lookback window, measured in CALENDAR years
+// from the most recent one.
+//
+// Taking the last N entries instead looked equivalent, but it isn't when a year
+// is missing — and years go missing often, because a filing whose revenue
+// concept we can't match is dropped during parsing. Coupa (CCC) parses to 2012,
+// 2013, 2022, 2024 and 2025: the last five entries span *thirteen* years, so its
+// "long-term growth" criterion compared 2012 against 2025 while Apple compared
+// five years. Filtering by year keeps the window the same width for every stock,
+// which is what the cap was always meant to do.
+function withinLookback(annuals) {
+  if (annuals.length === 0) return [];
+  const latestYear = annuals[annuals.length - 1].year;
+  const oldestAllowed = latestYear - (ANNUAL_LOOKBACK_YEARS - 1);
+  return annuals.filter((a) => a.year >= oldestAllowed);
+}
+
 // Parse 10-Q quarterly reports into { year, quarter, revenue, fcf } objects.
 // Values here are cumulative YTD — used only for TTM calculation.
 function parseQuarterlyYTD(reports, symbol = null) {
@@ -331,7 +348,7 @@ async function getStockData(ticker) {
   // but the graded arrays are capped to the most recent few years.
   const annualData    = parseAnnualReports(annualFin.data ?? [], finSymbol);
   const quarterlyData = parseQuarterlyYTD(quarterlyFin.data ?? [], finSymbol);
-  const recentAnnual  = annualData.slice(-ANNUAL_LOOKBACK_YEARS);
+  const recentAnnual  = withinLookback(annualData);
 
   const annualRevenues      = recentAnnual.map((a) => a.revenue);
   const annualFreeCashFlows = recentAnnual.filter((a) => a.fcf !== null).map((a) => a.fcf);
@@ -413,4 +430,4 @@ async function resolveTicker(query) {
   return pickResolvedSymbol(data.result);
 }
 
-module.exports = { getStockData, resolveTicker, pickResolvedSymbol, parseAnnualReports, findCapex };
+module.exports = { getStockData, resolveTicker, pickResolvedSymbol, parseAnnualReports, findCapex, withinLookback };

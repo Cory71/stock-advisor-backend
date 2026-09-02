@@ -216,3 +216,42 @@ describe('findCapex — per-company segment capex', () => {
     expect(findCapex([{ concept: 'foo_Something', value: 1 }], null)).to.equal(null);
   });
 });
+
+// --- Lookback window ------------------------------------------------------
+// The cap exists so "long-term growth" spans the same number of years for every
+// stock. Taking the last N entries breaks that when a year is missing, which
+// happens whenever a filing's revenue concept can't be matched.
+const { withinLookback } = require('../../providers/finnhubProvider');
+
+const yearsOf = (rows) => rows.map((r) => r.year);
+const annuals = (years) => years.map((year) => ({ year, revenue: 1, fcf: 1 }));
+
+describe('withinLookback', () => {
+  it('keeps five consecutive years unchanged', () => {
+    expect(yearsOf(withinLookback(annuals([2021, 2022, 2023, 2024, 2025]))))
+      .to.deep.equal([2021, 2022, 2023, 2024, 2025]);
+  });
+
+  it('keeps only the most recent five calendar years', () => {
+    expect(yearsOf(withinLookback(annuals([2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025]))))
+      .to.deep.equal([2021, 2022, 2023, 2024, 2025]);
+  });
+
+  // Coupa parses to 2012, 2013, 2022, 2024, 2025. Taking the last five entries
+  // spans thirteen years, so its long-term growth compared 2012 with 2025.
+  it('drops years far outside the window even when that leaves fewer rows', () => {
+    expect(yearsOf(withinLookback(annuals([2012, 2013, 2022, 2024, 2025]))))
+      .to.deep.equal([2022, 2024, 2025]);
+  });
+
+  // Duke Energy: 2022 and 2023 are missing, but the rest are inside the window.
+  it('keeps a gapped run when every year is still inside the window', () => {
+    expect(yearsOf(withinLookback(annuals([2019, 2020, 2021, 2024, 2025]))))
+      .to.deep.equal([2021, 2024, 2025]);
+  });
+
+  it('handles fewer years than the window and an empty list', () => {
+    expect(yearsOf(withinLookback(annuals([2024, 2025])))).to.deep.equal([2024, 2025]);
+    expect(withinLookback([])).to.deep.equal([]);
+  });
+});
