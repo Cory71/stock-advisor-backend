@@ -1,0 +1,49 @@
+# Re-grades every stale stock in the shared cache once a day, so watchlists
+# stay current and grade changes can be noticed while nobody is logged in.
+#
+# Needs two repository secrets (Settings -> Secrets and variables -> Actions):
+#   MONGO_URI        — the same Atlas connection string the backend uses
+#   FINNHUB_API_KEY  — the same Finnhub key the backend uses
+#
+# GitHub emails the repo owner when a run fails. Runs can also be started by
+# hand from the Actions tab ("Run workflow").
+
+name: Refresh stock cache
+
+on:
+  schedule:
+    # 09:00 UTC daily — early morning in North America, well clear of US
+    # market hours. Filings only change quarterly, so daily is plenty.
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+
+# Never let two runs overlap — they'd share one Finnhub rate limit.
+concurrency:
+  group: refresh-cache
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    # A full run of ~80 stocks takes about 6 minutes; stop a hung run well
+    # before GitHub's 6-hour default.
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --omit=dev
+
+      - name: Refresh stale grades
+        run: npm run refresh
+        env:
+          MONGO_URI: ${{ secrets.MONGO_URI }}
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
