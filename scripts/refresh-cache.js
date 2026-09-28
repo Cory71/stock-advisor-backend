@@ -8,8 +8,9 @@
 //
 // Exit code tells the scheduler whether to flag the run:
 //   0 — finished (individual ticker failures are listed, not fatal)
-//   1 — couldn't connect, or every single ticker failed (likely an outage
-//       or a bad API key, which someone should look at)
+//   1 — couldn't connect, or every ticker it tried failed (likely an outage
+//       or a bad API key, which someone should look at). Listings Finnhub's
+//       plan doesn't cover are skipped and never count as a failure.
 
 require('dotenv').config();
 const mongoose = require('mongoose');
@@ -21,6 +22,7 @@ function printSummary(summary, startedAt) {
   console.log(`Stale stocks:   ${summary.checked}`);
   console.log(`Refreshed:      ${summary.refreshed}`);
   console.log(`Grade changes:  ${summary.gradeChanges.length}`);
+  console.log(`Skipped:        ${summary.skipped.length}  (not covered by the Finnhub plan)`);
   console.log(`Failed:         ${summary.failed.length}`);
   console.log(`Took:           ${seconds}s`);
   for (const change of summary.gradeChanges) {
@@ -31,9 +33,10 @@ function printSummary(summary, startedAt) {
   }
 }
 
-// Every ticker failing points at something systemic, not one bad symbol.
+// Every attempt failing points at something systemic (outage, bad key), not
+// one bad symbol. Skipped listings don't count — they can never succeed.
 function everythingFailed(summary) {
-  return summary.checked > 0 && summary.refreshed === 0;
+  return summary.failed.length > 0 && summary.refreshed === 0;
 }
 
 async function main() {

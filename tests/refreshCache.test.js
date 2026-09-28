@@ -82,8 +82,21 @@ describe('refreshCache', () => {
     expect(saved.grade).to.equal('B');
   });
 
+  // Found on the first CI run: IEC.AQ was the only stale stock, Finnhub
+  // refused it, and the whole run was flagged as an outage.
+  it('reports a listing Finnhub refuses as skipped, not failed', async () => {
+    await cacheStock('IEC.AQ');
+    const refused = Object.assign(new Error('Finnhub returned 403'), { status: 403 });
+    sinon.stub(finnhubProvider, 'getStockData').rejects(refused);
+
+    const summary = await refreshCache({ delayMs: 0 });
+
+    expect(summary.skipped).to.deep.equal(['IEC.AQ']);
+    expect(summary.failed).to.deep.equal([]);
+  });
+
   it('does nothing when the cache is empty', async () => {
     const summary = await refreshCache({ delayMs: 0 });
-    expect(summary).to.deep.equal({ checked: 0, refreshed: 0, failed: [], gradeChanges: [] });
+    expect(summary).to.deep.equal({ checked: 0, refreshed: 0, skipped: [], failed: [], gradeChanges: [] });
   });
 });
