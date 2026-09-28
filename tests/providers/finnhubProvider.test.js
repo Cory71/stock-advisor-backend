@@ -202,6 +202,27 @@ describe('findCapex — per-company segment capex', () => {
     expect(findCapex(cf, 'NEE')).to.equal(24_050_000_000);
   });
 
+  // In 2021 Gulf Power was still reported apart from FPL, and FPL used a
+  // different concept name. PublicUtility equals FPL segment + Gulf Power, so
+  // adding it would count $7.4B twice.
+  it("uses NextEra's 2021 concepts, without the duplicate PublicUtility line", () => {
+    const cf = [
+      { concept: 'nee_CapitalExpendituresOfFPLSegment',       value: 6_630_000_000 },
+      { concept: 'nee_CapitalExpendituresOfGulfPowerSegment', value:   780_000_000 },
+      { concept: NEE_NEER,                                    value: 8_250_000_000 },
+      { concept: NEE_OTHER,                                   value:   150_000_000 },
+      { concept: 'nee_CapitalExpendituresOfPublicUtility',    value: 7_410_000_000 },
+    ];
+    expect(findCapex(cf, 'NEE')).to.equal(15_810_000_000);
+  });
+
+  it("reads NVIDIA's own capex concept from its older filings", () => {
+    const cf = [
+      { concept: 'nvda_PurchasesOfPropertyAndEquipmentAndIntangibleAssets', value: 1_830_000_000 },
+    ];
+    expect(findCapex(cf, 'NVDA')).to.equal(1_830_000_000);
+  });
+
   it('prefers a standard concept when the filer reports one', () => {
     const cf = [
       { concept: 'us-gaap_PaymentsToAcquirePropertyPlantAndEquipment', value: 5_000 },

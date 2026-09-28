@@ -88,30 +88,53 @@ const OCF_CONCEPTS = [
 ];
 
 // A few companies report no single consolidated capital-expenditure line —
-// they split spending across segment concepts under their own XBRL prefix, so
-// none of CAPEX_CONCEPTS below match and the stock can't be graded at all.
+// they file it under their own XBRL prefix, so none of CAPEX_CONCEPTS below
+// match and free cash flow can't be computed.
 //
-// Each entry lists the parts to add together, plus the parts that MUST be
-// present for the total to be trustworthy. NextEra, for example, splits capex
-// between Florida Power & Light and its clean-energy arm; its 2021 filing omits
-// the FPL line, and adding up what's left would understate that year by roughly
-// $9B and invent an improving trend. When a required part is missing we return
-// null so the year is skipped instead of silently wrong.
+// Each company maps to a list of VARIANTS, because a filer's concepts can change
+// from year to year. The first variant whose required parts are all present is
+// used; its parts are added together. If no variant fits, the year gets no
+// capex rather than a partial total — a missing piece treated as zero would
+// understate spending and invent a trend.
 //
 // Keep this small and evidence-based: only add a company after checking which
-// concepts it actually reports, across every year. Note that a filer may label
-// the same money twice (NextEra reports nee_CapitalExpendituresOfPublicUtility
-// with the identical value as nee_CapitalExpendituresOfFPL), so parts must be
-// chosen deliberately rather than pattern-matched, or the total double-counts.
+// concepts it actually reports, year by year. Filers sometimes label the same
+// money twice (see NextEra below), so parts are listed deliberately rather than
+// pattern-matched — otherwise the total double-counts.
 const COMPANY_CAPEX_CONCEPTS = {
-  NEE: {
-    parts: [
-      'nee_CapitalExpendituresOfFPL',        // regulated utility (Florida Power & Light)
-      'nee_IndependentPowerInvestments',     // NextEra Energy Resources (clean energy)
-      'nee_OtherCapitalExpenditures',
-    ],
-    required: ['nee_CapitalExpendituresOfFPL', 'nee_IndependentPowerInvestments'],
-  },
+  NEE: [
+    // 2022 onward: Florida Power & Light plus the clean-energy arm.
+    // nee_CapitalExpendituresOfPublicUtility repeats the FPL figure — never add it.
+    {
+      parts: ['nee_CapitalExpendituresOfFPL', 'nee_IndependentPowerInvestments', 'nee_OtherCapitalExpenditures'],
+      required: ['nee_CapitalExpendituresOfFPL', 'nee_IndependentPowerInvestments'],
+    },
+    // 2021: Gulf Power was still reported separately from FPL, and FPL used a
+    // different concept name. PublicUtility (7.41B) = FPL segment + Gulf Power,
+    // so it's left out here too.
+    {
+      parts: [
+        'nee_CapitalExpendituresOfFPLSegment',
+        'nee_CapitalExpendituresOfGulfPowerSegment',
+        'nee_IndependentPowerInvestments',
+        'nee_OtherCapitalExpenditures',
+      ],
+      required: [
+        'nee_CapitalExpendituresOfFPLSegment',
+        'nee_CapitalExpendituresOfGulfPowerSegment',
+        'nee_IndependentPowerInvestments',
+      ],
+    },
+  ],
+  NVDA: [
+    // Fiscal 2021-2023 filings use NVIDIA's own concept; later years use the
+    // standard one, which is tried first. Includes intangible purchases, so it
+    // slightly overstates capex — the cautious direction for free cash flow.
+    {
+      parts: ['nvda_PurchasesOfPropertyAndEquipmentAndIntangibleAssets'],
+      required: ['nvda_PurchasesOfPropertyAndEquipmentAndIntangibleAssets'],
+    },
+  ],
 };
 
 // Capital expenditure concepts. Finnhub reports the payment as a positive
@@ -174,23 +197,29 @@ function findRevenue(items) {
   return findMaxValue(items, ...REVENUE_FALLBACK_CONCEPTS);
 }
 
-// Add up a company's segment capex lines. Returns null when any required part
-// is missing, so a partial total never reaches the grader. See the notes on
-// COMPANY_CAPEX_CONCEPTS for why a missing part must not be treated as zero.
-function findCompanyCapex(items, symbol) {
-  const rule = COMPANY_CAPEX_CONCEPTS[symbol];
-  if (!rule) return null;
+// True when every required concept in a variant is present in the filing.
+function hasAllRequired(items, variant) {
+  return variant.required.every((concept) => findValue(items, concept) !== null);
+}
 
-  for (const concept of rule.required) {
-    if (findValue(items, concept) === null) return null;
-  }
-
-  let total = null;
-  for (const concept of rule.parts) {
+// Add up the parts of one variant.
+function sumParts(items, variant) {
+  let total = 0;
+  for (const concept of variant.parts) {
     const value = findValue(items, concept);
-    if (value !== null) total = (total ?? 0) + Math.abs(value);
+    if (value !== null) total += Math.abs(value);
   }
   return total;
+}
+
+// Capex from a company's own segment lines, or null when no variant fits.
+// See COMPANY_CAPEX_CONCEPTS for why a partial total is never returned.
+function findCompanyCapex(items, symbol) {
+  const variants = COMPANY_CAPEX_CONCEPTS[symbol];
+  if (!variants) return null;
+
+  const match = variants.find((variant) => hasAllRequired(items, variant));
+  return match ? sumParts(items, match) : null;
 }
 
 // Pick a company's capital expenditure. Standard concepts first; only if none
@@ -266,8 +295,9 @@ function parseAnnualReports(reports, symbol = null) {
 // from the most recent one.
 //
 // Taking the last N entries instead looked equivalent, but it isn't when a year
-// is missing — and years go missing often, because a filing whose revenue
-// concept we can't match is dropped during parsing. Coupa (CCC) parses to 2012,
+// is missing — and years go missing often, mostly because Finnhub simply has no
+// annual report for them (13 cached stocks, including Duke, Walmart and AMD).
+// Coupa (CCC) parses to 2012,
 // 2013, 2022, 2024 and 2025: the last five entries span *thirteen* years, so its
 // "long-term growth" criterion compared 2012 against 2025 while Apple compared
 // five years. Filtering by year keeps the window the same width for every stock,
