@@ -16,7 +16,18 @@
 //   TTM uses the standard formula:
 //     TTM = CurrentYTD + (PriorYearAnnual − SamePeriodPriorYearYTD)
 
+const { createRateLimiter } = require('../lib/rateLimiter');
+
 const BASE_URL = 'https://finnhub.io/api/v1';
+
+// Finnhub's free tier allows 60 calls a minute for the whole API key, and every
+// user shares that one key. Without a limit, each request fires its calls as
+// fast as it can, so a big "Refresh all" — or a few people clicking at once —
+// errors partway through. Every call below waits its turn instead.
+//
+// 55 rather than 60 leaves a little headroom for the daily refresh job, which
+// runs on GitHub's machines and doesn't share this limiter.
+const finnhubLimiter = createRateLimiter({ limit: 55, windowMs: 60_000 });
 
 // How many recent annual periods to grade on. Finnhub returns wildly different
 // history lengths per stock (Apple ~16 years, Alphabet ~11), so we cap to the
@@ -234,6 +245,9 @@ function findCapex(items, symbol) {
 async function finnhubGet(path, params = {}) {
   const key = process.env.FINNHUB_API_KEY;
   if (!key) throw new Error('FINNHUB_API_KEY is not set in environment');
+
+  // Wait for a free slot under the shared per-minute limit.
+  await finnhubLimiter.waitForSlot();
 
   const url = new URL(`${BASE_URL}${path}`);
   url.searchParams.set('token', key);

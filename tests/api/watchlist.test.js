@@ -9,6 +9,12 @@ const { createUserAndToken } = require('../helpers/authToken');
 const Stock = require('../../models/Stock');
 const WatchlistItem = require('../../models/WatchlistItem');
 
+// Backdate a cached stock so it no longer counts as "graded recently".
+async function makeStale(ticker, hoursAgo = 2) {
+  const updatedAt = new Date(Date.now() - hoursAgo * 60 * 60 * 1000);
+  await Stock.updateOne({ ticker }, { $set: { updatedAt } }, { timestamps: false });
+}
+
 describe('/api/watchlist', () => {
   let token;
   let userId;
@@ -124,11 +130,13 @@ describe('/api/watchlist', () => {
     it('re-grades every row with fresh data and returns the updated list', async () => {
       const provider = require('../../providers/finnhubProvider');
 
-      // Add a ticker — this grades it once and caches it.
+      // Add a ticker — this grades it once and caches it — then make that
+      // grade older than an hour so the refresh actually re-fetches it.
       await request(app)
         .post('/api/watchlist')
         .set('Authorization', `Bearer ${token}`)
         .send({ ticker: 'AAPL' });
+      await makeStale('AAPL');
 
       const callsAfterAdd = provider.getStockData.callCount;
 
@@ -144,6 +152,22 @@ describe('/api/watchlist', () => {
       expect(provider.getStockData.callCount).to.be.greaterThan(callsAfterAdd);
     });
 
+    // A double click, or a click right after the daily job, should be free.
+    it('skips rows graded within the last hour', async () => {
+      const provider = require('../../providers/finnhubProvider');
+      await request(app)
+        .post('/api/watchlist')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ ticker: 'AAPL' });
+      const callsAfterAdd = provider.getStockData.callCount;
+
+      await request(app)
+        .post('/api/watchlist/refresh')
+        .set('Authorization', `Bearer ${token}`);
+
+      expect(provider.getStockData.callCount).to.equal(callsAfterAdd);
+    });
+
     it('returns an empty list for a user with no watchlist', async () => {
       const res = await request(app)
         .post('/api/watchlist/refresh')
@@ -151,6 +175,51 @@ describe('/api/watchlist', () => {
 
       expect(res.status).to.equal(200);
       expect(res.body).to.be.an('array').that.is.empty;
+    });
+  });
+
+  describe('POST /api/watchlist/:ticker/refresh', () => {
+    async function addToWatchlist(ticker) {
+      await request(app)
+        .post('/api/watchlist')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ ticker });
+    }
+
+    it('re-grades one stale row and reports that it refreshed', async () => {
+      await addToWatchlist('AAPL');
+      await makeStale('AAPL');
+
+      const res = await request(app)
+        .post('/api/watchlist/AAPL/refresh')
+        .set('Authorization', `Bearer ${token}`);
+
+      expect(res.status).to.equal(200);
+      expect(res.body).to.deep.equal({ ticker: 'AAPL', refreshed: true });
+    });
+
+    it('reports refreshed: false for a row graded in the last hour', async () => {
+      await addToWatchlist('AAPL');
+
+      const res = await request(app)
+        .post('/api/watchlist/aapl/refresh')
+        .set('Authorization', `Bearer ${token}`);
+
+      expect(res.status).to.equal(200);
+      expect(res.body).to.deep.equal({ ticker: 'AAPL', refreshed: false });
+    });
+
+    it("refuses a ticker that is not on the user's watchlist", async () => {
+      const res = await request(app)
+        .post('/api/watchlist/MSFT/refresh')
+        .set('Authorization', `Bearer ${token}`);
+
+      expect(res.status).to.equal(404);
+    });
+
+    it('rejects requests without a JWT', async () => {
+      const res = await request(app).post('/api/watchlist/AAPL/refresh');
+      expect(res.status).to.equal(401);
     });
   });
 

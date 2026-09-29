@@ -125,11 +125,32 @@ router.get('/', async (req, res) => {
   }
 });
 
+// ---------- Refreshing ----------
+
+// Anything graded within the last hour is left alone, so a double click — or a
+// click just after the daily refresh — costs no Finnhub calls at all.
+const RECENT_REFRESH_MS = 60 * 60 * 1000;   // 1 hour
+
+// True when the cached stock was graded within the last hour.
+async function gradedRecently(ticker) {
+  const cached = await Stock.findOne({ ticker }).select('updatedAt price').lean();
+  if (!cached || cached.price == null) return false;
+  return Date.now() - new Date(cached.updatedAt).getTime() < RECENT_REFRESH_MS;
+}
+
+// Re-grade one ticker unless it was graded recently. Returns true when it
+// actually fetched fresh data. Finnhub calls are paced by the provider's
+// shared rate limiter, so a long list waits its turn rather than failing.
+async function refreshIfOld(ticker) {
+  if (await gradedRecently(ticker)) return false;
+  await resolveAndGrade(ticker, { forceRefresh: true });
+  return true;
+}
+
 // POST /api/watchlist/refresh
-// Forces a fresh re-grade of every ticker in the watchlist (bypassing the
-// cache), then returns the updated list. Tickers are refreshed one at a time
-// to stay within Finnhub's rate limit; a single failing ticker is skipped so
-// the rest of the list still refreshes.
+// Re-grades every ticker in the watchlist that wasn't graded in the last hour,
+// then returns the updated list. A single failing ticker is skipped so the rest
+// of the list still refreshes.
 router.post('/refresh', async (req, res) => {
   try {
     const items = await WatchlistItem
@@ -139,7 +160,7 @@ router.post('/refresh', async (req, res) => {
 
     for (const item of items) {
       try {
-        await resolveAndGrade(item.ticker, { forceRefresh: true });
+        await refreshIfOld(item.ticker);
       } catch {
         // Skip tickers that can't be re-graded right now (e.g. a delisted
         // symbol or a transient provider error) — the rest still refresh.
@@ -149,6 +170,27 @@ router.post('/refresh', async (req, res) => {
     res.json(await enrichWatchlist(req.user.id));
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
+// POST /api/watchlist/:ticker/refresh
+// Re-grades a single watchlist row. The page calls this once per row so it can
+// show "Refreshing 12 of 30…" as it goes, then reloads the list at the end.
+// Returns { ticker, refreshed } — refreshed is false when the row was graded in
+// the last hour and was skipped.
+router.post('/:ticker/refresh', async (req, res) => {
+  const ticker = req.params.ticker.toUpperCase();
+  try {
+    // Only rows in this user's own watchlist can be refreshed through here.
+    const onWatchlist = await WatchlistItem.exists({ userId: req.user.id, ticker });
+    if (!onWatchlist) {
+      return res.status(404).json({ message: `${ticker} isn't on your watchlist.` });
+    }
+
+    const refreshed = await refreshIfOld(ticker);
+    res.json({ ticker, refreshed });
+  } catch (err) {
+    res.status(502).json({ message: friendlyStockError(err, ticker) });
   }
 });
 
