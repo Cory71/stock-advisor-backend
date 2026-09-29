@@ -1,0 +1,22 @@
+{
+  "computedAt": "2026-09-29",
+  "pool": [
+    "BAC",
+    "C",
+    "CFG",
+    "FITB",
+    "HBAN",
+    "JPM",
+    "KEY",
+    "MTB",
+    "PNC",
+    "RF",
+    "TFC",
+    "USB",
+    "WFC",
+    "ZION"
+  ],
+  "roe": 0.1049,
+  "roa": 0.01,
+  "efficiency": 0.6065
+}

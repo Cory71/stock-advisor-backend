@@ -5,7 +5,7 @@ const express = require('express');
 const WatchlistItem = require('../models/WatchlistItem');
 const Stock = require('../models/Stock');
 const verifyToken = require('../middleware/authMiddleware');
-const { gradeStock } = require('../lib/grading');
+const { gradeAndSave } = require('../lib/gradeAndSave');
 const { friendlyStockError } = require('../lib/friendlyError');
 const finnhubProvider = require('../providers/finnhubProvider');
 
@@ -59,24 +59,7 @@ async function resolveAndGrade(raw, { forceRefresh = false } = {}) {
     rawData = await finnhubProvider.getStockData(ticker);
   }
 
-  const graded = gradeStock(rawData);
-  const name = rawData.longName || null;
-
-  return Stock.findOneAndUpdate(
-    { ticker },
-    {
-      ticker,
-      name,
-      price: rawData.price ?? null,
-      currency: rawData.currency ?? null,
-      grade: graded.grade,
-      criteria: graded.criteria,
-      reason: graded.reason ?? null,
-      note: graded.note ?? null,
-      rawData
-    },
-    { upsert: true, new: true, setDefaultsOnInsert: true }
-  );
+  return gradeAndSave(ticker, rawData);
 }
 
 // Load a user's saved tickers (newest first) and enrich each row with the live

@@ -13,7 +13,10 @@ const criterionSchema = new mongoose.Schema({
   passed: { type: Boolean, default: null },                       // yes / no / null = N/A
   value:  { type: Number },                                        // the actual number used
   prior:  { type: Number },                                        // the comparison number
-  source: { type: String }                                         // e.g. "income statement"
+  source: { type: String },                                       // e.g. "income statement"
+  // How the page should print value and prior. Dollar amounts unless a
+  // criterion says otherwise — the bank model's ratios use 'percent'.
+  format: { type: String, enum: ['currency', 'percent'], default: 'currency' }
 }, { _id: false }); // sub-docs don't need their own _id
 
 const stockSchema = new mongoose.Schema({
@@ -29,6 +32,15 @@ const stockSchema = new mongoose.Schema({
     type: String,
     enum: ['A', 'B', 'C', 'D', 'F', 'N/A'],
     required: true
+  },
+
+  // Which grading model produced the grade. Banks are judged on different
+  // criteria (lib/gradingBank.js), so the page labels them — the same letter
+  // means something different under each model.
+  model: {
+    type: String,
+    enum: ['general', 'bank'],
+    default: 'general'
   },
 
   // Exactly 5 criteria per the grading algorithm.

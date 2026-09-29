@@ -6,7 +6,7 @@ const express = require('express');
 const verifyToken = require('../middleware/authMiddleware');
 const Stock = require('../models/Stock');
 const SearchHistory = require('../models/SearchHistory');
-const { gradeStock } = require('../lib/grading');
+const { gradeAndSave } = require('../lib/gradeAndSave');
 const { friendlyStockError } = require('../lib/friendlyError');
 const finnhubProvider = require('../providers/finnhubProvider');
 
@@ -46,6 +46,7 @@ async function gradeOne(query, userId) {
       name: cached.name || null,
       price: cached.price ?? null,
       currency: cached.currency || null,
+      model: cached.model || 'general',
       grade: cached.grade,
       criteria: cached.criteria,
       reason: cached.reason || null,
@@ -70,24 +71,7 @@ async function gradeOne(query, userId) {
     rawData = await finnhubProvider.getStockData(ticker);
   }
 
-  const name = rawData.longName || resolvedName;
-  const graded = gradeStock(rawData);
-
-  const saved = await Stock.findOneAndUpdate(
-    { ticker },
-    {
-      ticker,
-      name,
-      price: rawData.price ?? null,
-      currency: rawData.currency ?? null,
-      grade: graded.grade,
-      criteria: graded.criteria,
-      reason: graded.reason ?? null,
-      note: graded.note ?? null,
-      rawData
-    },
-    { upsert: true, new: true, setDefaultsOnInsert: true }
-  );
+  const saved = await gradeAndSave(ticker, rawData, { fallbackName: resolvedName });
 
   // Record history (with dedup).
   const lastSearch = await SearchHistory.findOne({ userId }).sort({ createdAt: -1 }).select('ticker');
@@ -100,6 +84,7 @@ async function gradeOne(query, userId) {
     name: saved.name,
     price: saved.price ?? null,
     currency: saved.currency || null,
+    model: saved.model || 'general',
     grade: saved.grade,
     criteria: saved.criteria,
     reason: saved.reason || null,

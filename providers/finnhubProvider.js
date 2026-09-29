@@ -17,6 +17,7 @@
 //     TTM = CurrentYTD + (PriorYearAnnual − SamePeriodPriorYearYTD)
 
 const { createRateLimiter } = require('../lib/rateLimiter');
+const { isBankIndustry } = require('../lib/selectGrader');
 
 const BASE_URL = 'https://finnhub.io/api/v1';
 
@@ -172,6 +173,36 @@ const CAPEX_CONCEPTS = [
   'PurchaseOfPropertyPlantAndEquipment',
 ];
 
+// ---------- Bank concepts ----------
+// Banks are graded on different figures (see lib/gradingBank.js). These lists
+// are kept separate from the revenue / cash-flow lists above, so adding a bank
+// concept can never change a non-bank's numbers.
+
+const BANK_NET_INCOME_CONCEPTS = [
+  'us-gaap_NetIncomeLoss',
+  'NetIncomeLoss',
+  'us-gaap_NetIncomeLossAvailableToCommonStockholdersBasic',
+];
+// Some banks (e.g. PNC) file net income only under their own prefix, like
+// pnc_NetIncomeLossAvailableToCommonStockholders. Matched by this ending.
+const BANK_NET_INCOME_SUFFIX = '_NetIncomeLossAvailableToCommonStockholders';
+
+const BANK_EQUITY_CONCEPTS  = [
+  'us-gaap_StockholdersEquity',
+  'StockholdersEquity',
+  // Fallback only: some years are filed solely as equity *including* outside
+  // shareholders' stakes in subsidiaries (FITB 2021-22, TFC 2021-24). For banks
+  // that stake is tiny, so this is close enough to compare against — far better
+  // than leaving book value growth unreadable.
+  'us-gaap_StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest',
+  'StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest',
+];
+const BANK_ASSETS_CONCEPTS  = ['us-gaap_Assets', 'Assets'];
+const BANK_NII_CONCEPTS     = ['us-gaap_InterestIncomeExpenseNet', 'InterestIncomeExpenseNet'];
+const BANK_NONINT_INCOME    = ['us-gaap_NoninterestIncome', 'NoninterestIncome'];
+const BANK_NONINT_EXPENSE   = ['us-gaap_NoninterestExpense', 'NoninterestExpense'];
+const BANK_REVENUE_CONCEPTS = ['us-gaap_RevenuesNetOfInterestExpense', 'us-gaap_Revenues', 'Revenues'];
+
 // Return the first matching XBRL concept value from an array of { concept, value } items.
 // Used for cash-flow lines, where filers report a single relevant figure.
 function findValue(items, ...concepts) {
@@ -323,6 +354,76 @@ function withinLookback(annuals) {
   return annuals.filter((a) => a.year >= oldestAllowed);
 }
 
+// ---------- Bank reports ----------
+
+// A bank's net income: standard concepts first, then a company-prefixed one.
+function findBankNetIncome(items) {
+  const standard = findValue(items, ...BANK_NET_INCOME_CONCEPTS);
+  if (standard !== null) return standard;
+  const prefixed = items.find((i) => i.concept.endsWith(BANK_NET_INCOME_SUFFIX));
+  return prefixed && typeof prefixed.value === 'number' ? prefixed.value : null;
+}
+
+// A bank's total revenue. Many banks report no consolidated revenue line, so
+// fall back to the standard banking definition: net interest income plus
+// noninterest income.
+function findBankRevenue(items) {
+  const reported = findValue(items, ...BANK_REVENUE_CONCEPTS);
+  if (reported !== null) return reported;
+  const interest = findValue(items, ...BANK_NII_CONCEPTS);
+  const nonInterest = findValue(items, ...BANK_NONINT_INCOME);
+  return interest !== null && nonInterest !== null ? interest + nonInterest : null;
+}
+
+// Parse 10-K reports into one bank row per year, oldest -> newest.
+//
+// Separate from parseAnnualReports on purpose: that parser skips any year with
+// no matching revenue concept, and banks like USB and TFC have none — every
+// year would be dropped. Like it, this keeps one report per year for combined
+// filings, choosing the largest total assets (the parent's consolidated balance
+// sheet) and taking every other figure from that same report.
+function parseBankReports(reports) {
+  const bestByYear = new Map();
+
+  for (const report of reports) {
+    const ic = report.report?.ic ?? [];
+    const bs = report.report?.bs ?? [];
+
+    const assets = findValue(bs, ...BANK_ASSETS_CONCEPTS);
+    if (assets === null) continue;
+
+    const existing = bestByYear.get(report.year);
+    if (existing && existing.assets >= assets) continue;
+
+    bestByYear.set(report.year, {
+      year: report.year,
+      endDate: report.endDate ?? null,
+      assets,
+      equity: findValue(bs, ...BANK_EQUITY_CONCEPTS),
+      netIncome: findBankNetIncome(ic),
+      revenue: findBankRevenue(ic),
+      noninterestExpense: findValue(ic, ...BANK_NONINT_EXPENSE),
+    });
+  }
+
+  return [...bestByYear.values()].sort((a, b) => a.year - b.year);
+}
+
+// The bank fields added to getStockData's result, inside the same calendar-year
+// window as the general figures. Each list lines up with annualBankYears.
+function bankFields(annualReports) {
+  const rows = withinLookback(parseBankReports(annualReports));
+  return {
+    annualBankYears: rows.map((r) => r.year),
+    annualNetIncome: rows.map((r) => r.netIncome),
+    annualEquity: rows.map((r) => r.equity),
+    annualAssets: rows.map((r) => r.assets),
+    annualBankRevenue: rows.map((r) => r.revenue),
+    annualNoninterestExpense: rows.map((r) => r.noninterestExpense),
+    latestBankEndDate: rows.length ? rows[rows.length - 1].endDate : null,
+  };
+}
+
 // Parse 10-Q quarterly reports into { year, quarter, revenue, fcf } objects.
 // Values here are cumulative YTD — used only for TTM calculation.
 function parseQuarterlyYTD(reports, symbol = null) {
@@ -425,6 +526,10 @@ async function getStockData(ticker) {
   // it to add a caveat when revenue/FCF is only a rough proxy for the sector.
   const industry = profile.finnhubIndustry || null;
 
+  // Bank figures are only worked out for stocks routed to the bank model, so
+  // every other stock's cached data stays exactly as it was.
+  const bank = isBankIndustry(industry) ? bankFields(annualFin.data ?? []) : {};
+
   return {
     annualRevenues,
     ttmRevenue,
@@ -438,6 +543,7 @@ async function getStockData(ticker) {
     longName,
     price,
     currency,
+    ...bank,
   };
 }
 
@@ -474,4 +580,7 @@ async function resolveTicker(query) {
   return pickResolvedSymbol(data.result);
 }
 
-module.exports = { getStockData, resolveTicker, pickResolvedSymbol, parseAnnualReports, findCapex, withinLookback };
+module.exports = {
+  getStockData, resolveTicker, pickResolvedSymbol,
+  parseAnnualReports, parseBankReports, findCapex, withinLookback,
+};

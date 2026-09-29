@@ -7,7 +7,7 @@ const express = require('express');
 const verifyToken = require('../middleware/authMiddleware');
 const Stock = require('../models/Stock');
 const SearchHistory = require('../models/SearchHistory');
-const { gradeStock } = require('../lib/grading');
+const { gradeAndSave } = require('../lib/gradeAndSave');
 const { friendlyStockError } = require('../lib/friendlyError');
 // Imported as a namespace (not destructured) so test stubs that swap out
 // `finnhubProvider.getStockData` are actually seen by these route handlers.
@@ -38,6 +38,9 @@ function shape(stock, { cached, fallbackName }) {
     name: stock.name || fallbackName || null,
     price: stock.price ?? null,
     currency: stock.currency || null,
+    // Which model graded it — the page labels bank grades, since the same
+    // letter means something different under each model.
+    model: stock.model || 'general',
     grade: stock.grade,
     criteria: stock.criteria,
     reason: stock.reason || null,
@@ -130,25 +133,7 @@ router.get('/:query', verifyToken, async (req, res) => {
 
     // Prefer the name from getStockData (more reliable); fall back to whatever
     // search returned earlier.
-    const name = rawData.longName || resolvedName;
-
-    const graded = gradeStock(rawData);
-
-    const saved = await Stock.findOneAndUpdate(
-      { ticker },
-      {
-        ticker,
-        name,
-        price: rawData.price ?? null,
-        currency: rawData.currency ?? null,
-        grade: graded.grade,
-        criteria: graded.criteria,
-        reason: graded.reason ?? null,
-        note: graded.note ?? null,
-        rawData
-      },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
-    );
+    const saved = await gradeAndSave(ticker, rawData, { fallbackName: resolvedName });
 
     await recordHistory(req.user.id, ticker);
     res.json(shape(saved, { cached: false, fallbackName: resolvedName }));

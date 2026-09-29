@@ -8,7 +8,9 @@
     "dev": "nodemon server.js",
     "test": "mocha --require tests/setup.js --timeout 30000 \"tests/**/*.test.js\"",
     "seed": "node scripts/seed-popular.js",
-    "refresh": "node scripts/refresh-cache.js"
+    "refresh": "node scripts/refresh-cache.js",
+    "seed:banks": "node scripts/seed-popular.js banks",
+    "bank-medians": "node scripts/compute-bank-medians.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

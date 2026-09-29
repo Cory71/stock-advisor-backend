@@ -6,15 +6,15 @@
 // writes grades into MongoDB so the deployed backend serves them without a
 // live Finnhub call.
 //
-// Run with: npm run seed
-// Or directly: node scripts/seed-popular.js
+// Run with: npm run seed         (popular stocks)
+//           npm run seed:banks   (the bank pool used for bank medians)
+// Or directly: node scripts/seed-popular.js [banks]
 //
 // Safe to re-run — it upserts and refreshes the cache timestamp.
 
 require('dotenv').config();
 const mongoose = require('mongoose');
-const Stock = require('../models/Stock');
-const { gradeStock } = require('../lib/grading');
+const { gradeAndSave } = require('../lib/gradeAndSave');
 const { getStockData } = require('../providers/finnhubProvider');
 
 const TICKERS = [
@@ -30,27 +30,24 @@ const TICKERS = [
   'WMT'     // Walmart
 ];
 
+// Every stock Finnhub labels "Banking" that we grade on the bank model. These
+// set the bank medians (scripts/compute-bank-medians.js), so seed them before
+// computing. The daily refresh keeps them current afterwards.
+const BANK_TICKERS = [
+  'JPM', 'BAC', 'WFC', 'C',                 // money-centre banks
+  'USB', 'PNC', 'TFC', 'FITB', 'KEY',       // large regionals
+  'RF', 'MTB', 'HBAN', 'CFG', 'ZION'
+];
+
+// `node scripts/seed-popular.js banks` seeds the bank pool instead.
+const TICKERS_TO_SEED = process.argv[2] === 'banks' ? BANK_TICKERS : TICKERS;
+
 async function seedOne(ticker) {
   process.stdout.write(`  ${ticker} … `);
   try {
     const rawData = await getStockData(ticker);
-    const graded = gradeStock(rawData);
-    await Stock.findOneAndUpdate(
-      { ticker },
-      {
-        ticker,
-        name: rawData.longName || null,
-        price: rawData.price ?? null,
-        currency: rawData.currency ?? null,
-        grade: graded.grade,
-        criteria: graded.criteria,
-        reason: graded.reason ?? null,
-        note: graded.note ?? null,
-        rawData
-      },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
-    );
-    console.log(`${graded.grade}  ($${rawData.price?.toFixed(2)} ${rawData.currency})`);
+    const saved = await gradeAndSave(ticker, rawData);
+    console.log(`${saved.grade}  ($${rawData.price?.toFixed(2)} ${rawData.currency})`);
   } catch (err) {
     console.log(`SKIPPED — ${err.message}`);
   }
@@ -66,16 +63,16 @@ async function main() {
   await mongoose.connect(process.env.MONGO_URI);
   console.log(`Connected.\n`);
 
-  console.log(`Seeding ${TICKERS.length} tickers:`);
+  console.log(`Seeding ${TICKERS_TO_SEED.length} tickers:`);
   // Run sequentially with a delay between tickers to stay under Finnhub's
   // 60-calls-per-minute free-tier limit (each ticker makes 4 parallel calls).
-  for (const ticker of TICKERS) {
+  for (const ticker of TICKERS_TO_SEED) {
     await seedOne(ticker);
     // 5 s gap — 4 parallel calls per ticker, stays well under 60 calls/min.
     await new Promise((r) => setTimeout(r, 5000));
   }
 
-  console.log(`\nDone. ${TICKERS.length} tickers attempted.`);
+  console.log(`\nDone. ${TICKERS_TO_SEED.length} tickers attempted.`);
   await mongoose.disconnect();
   process.exit(0);
 }

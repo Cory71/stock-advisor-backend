@@ -276,3 +276,93 @@ describe('withinLookback', () => {
     expect(withinLookback([])).to.deep.equal([]);
   });
 });
+
+// --- Bank reports ---------------------------------------------------------
+// Banks are parsed separately: parseAnnualReports skips any year without a
+// matching revenue concept, and banks like USB and TFC report none.
+const { parseBankReports } = require('../../providers/finnhubProvider');
+
+function bankReport(year, { ic = [], bs = [] } = {}) {
+  return { year, endDate: `${year}-12-31 00:00:00`, report: { ic, bs } };
+}
+
+const B = 1_000_000_000;
+
+describe('parseBankReports', () => {
+  it('reads the bank figures from one filing', () => {
+    const [row] = parseBankReports([bankReport(2025, {
+      ic: [
+        { concept: 'us-gaap_NetIncomeLoss', value: 57 * B },
+        { concept: 'us-gaap_RevenuesNetOfInterestExpense', value: 182 * B },
+        { concept: 'us-gaap_NoninterestExpense', value: 95 * B },
+      ],
+      bs: [
+        { concept: 'us-gaap_Assets', value: 4400 * B },
+        { concept: 'us-gaap_StockholdersEquity', value: 362 * B },
+      ],
+    })]);
+    expect(row).to.include({ year: 2025, netIncome: 57 * B, revenue: 182 * B, noninterestExpense: 95 * B, assets: 4400 * B, equity: 362 * B });
+  });
+
+  // USB and TFC report no consolidated revenue line.
+  it('builds revenue from net interest income plus noninterest income', () => {
+    const [row] = parseBankReports([bankReport(2025, {
+      ic: [
+        { concept: 'us-gaap_InterestIncomeExpenseNet', value: 16 * B },
+        { concept: 'us-gaap_NoninterestIncome', value: 11 * B },
+      ],
+      bs: [{ concept: 'us-gaap_Assets', value: 660 * B }],
+    })]);
+    expect(row.revenue).to.equal(27 * B);
+  });
+
+  // PNC files net income only under its own prefix.
+  it('falls back to a company-prefixed net income concept', () => {
+    const [row] = parseBankReports([bankReport(2025, {
+      ic: [{ concept: 'pnc_NetIncomeLossAvailableToCommonStockholders', value: 6.6 * B }],
+      bs: [{ concept: 'us-gaap_Assets', value: 560 * B }],
+    })]);
+    expect(row.netIncome).to.equal(6.6 * B);
+  });
+
+  it('keeps one report per year, choosing the largest total assets', () => {
+    const rows = parseBankReports([
+      bankReport(2025, { ic: [{ concept: 'us-gaap_NetIncomeLoss', value: 1 * B }], bs: [{ concept: 'us-gaap_Assets', value: 90 * B }] }),
+      bankReport(2025, { ic: [{ concept: 'us-gaap_NetIncomeLoss', value: 9 * B }], bs: [{ concept: 'us-gaap_Assets', value: 900 * B }] }),
+    ]);
+    expect(rows).to.have.lengthOf(1);
+    expect(rows[0]).to.include({ assets: 900 * B, netIncome: 9 * B });
+  });
+
+  it("keeps a year even when it has no revenue concept, unlike the general parser", () => {
+    const rows = parseBankReports([bankReport(2025, { bs: [{ concept: 'us-gaap_Assets', value: 100 * B }] })]);
+    expect(rows).to.have.lengthOf(1);
+    expect(rows[0].revenue).to.equal(null);
+  });
+
+  // FITB and TFC file some years only as equity including noncontrolling interest.
+  it('falls back to equity including noncontrolling interest when that is all there is', () => {
+    const [row] = parseBankReports([bankReport(2021, {
+      bs: [
+        { concept: 'us-gaap_Assets', value: 540 * B },
+        { concept: 'us-gaap_StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest', value: 69.3 * B },
+      ],
+    })]);
+    expect(row.equity).to.equal(69.3 * B);
+  });
+
+  it('prefers plain stockholders equity when both are filed', () => {
+    const [row] = parseBankReports([bankReport(2025, {
+      bs: [
+        { concept: 'us-gaap_Assets', value: 540 * B },
+        { concept: 'us-gaap_StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest', value: 66 * B },
+        { concept: 'us-gaap_StockholdersEquity', value: 65.2 * B },
+      ],
+    })]);
+    expect(row.equity).to.equal(65.2 * B);
+  });
+
+  it('skips a filing with no total assets', () => {
+    expect(parseBankReports([bankReport(2025, { ic: [{ concept: 'us-gaap_NetIncomeLoss', value: 1 }] })])).to.deep.equal([]);
+  });
+});

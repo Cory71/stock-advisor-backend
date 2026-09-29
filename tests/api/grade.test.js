@@ -22,6 +22,42 @@ describe('GET /api/grade/:query', () => {
   });
   afterEach(restore);
 
+  it('grades an ordinary stock on the general model', async () => {
+    installStubs();
+    const res = await request(app).get('/api/grade/AAPL').set('Authorization', `Bearer ${token}`);
+    expect(res.body.model).to.equal('general');
+  });
+
+  // Banks have no free cash flow, so the general model returns N/A for them.
+  // A Banking-labelled stock must be routed to the bank model instead.
+  it('grades a Banking-labelled stock on the bank model', async () => {
+    const B = 1_000_000_000;
+    installStubs({
+      stockData: {
+        industry: 'Banking',
+        longName: 'JPMorgan Chase & Co',
+        price: 300,
+        currency: 'USD',
+        annualRevenues: [], annualFreeCashFlows: [],
+        annualBankYears: [2021, 2022, 2023, 2024, 2025],
+        annualEquity: [290 * B, 300 * B, 320 * B, 345 * B, 362 * B],
+        annualNetIncome: [48 * B, 37 * B, 49 * B, 58 * B, 57 * B],
+        annualAssets: [3700 * B, 3660 * B, 3870 * B, 4000 * B, 4424 * B],
+        annualBankRevenue: [121 * B, 128 * B, 158 * B, 177 * B, 182 * B],
+        annualNoninterestExpense: [71 * B, 76 * B, 87 * B, 92 * B, 95.6 * B],
+        latestBankEndDate: new Date().toISOString().slice(0, 10),
+      },
+      resolved: { symbol: 'JPM', name: 'JPMorgan Chase & Co' },
+    });
+
+    const res = await request(app).get('/api/grade/JPM').set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).to.equal(200);
+    expect(res.body.model).to.equal('bank');
+    expect(res.body.grade).to.match(/^[A-F]$/);
+    expect(res.body.criteria.map((c) => c.name)).to.include('Return on equity');
+  });
+
   it('rejects requests without a JWT', async () => {
     const res = await request(app).get('/api/grade/AAPL');
     expect(res.status).to.equal(401);
