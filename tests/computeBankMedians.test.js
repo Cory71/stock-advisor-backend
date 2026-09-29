@@ -52,3 +52,43 @@ describe('computeBankMedians', () => {
     expect(computeBankMedians(banks).pool).to.not.include('HALF');
   });
 });
+
+describe('mediansChanged', () => {
+  const { mediansChanged } = require('../lib/computeBankMedians');
+  const base = { computedAt: '2026-04-15', pool: ['A', 'B'], roe: 0.105, roa: 0.01, efficiency: 0.607 };
+
+  // The file carries the date, so a same-values run must not count as a change
+  // — otherwise the yearly job would commit every time.
+  it('ignores a new date when the medians and pool are the same', () => {
+    expect(mediansChanged(base, { ...base, computedAt: '2027-04-15' })).to.equal(false);
+  });
+
+  it('notices a changed median or pool', () => {
+    expect(mediansChanged(base, { ...base, roe: 0.11 })).to.equal(true);
+    expect(mediansChanged(base, { ...base, pool: ['A', 'B', 'C'] })).to.equal(true);
+  });
+
+  it('treats a first run as a change', () => {
+    expect(mediansChanged(null, base)).to.equal(true);
+  });
+});
+
+describe('suspiciousShifts', () => {
+  const { suspiciousShifts } = require('../lib/computeBankMedians');
+  const before = { roe: 0.10, roa: 0.01, efficiency: 0.60 };
+
+  it('allows an ordinary year-on-year move', () => {
+    expect(suspiciousShifts(before, { roe: 0.11, roa: 0.0105, efficiency: 0.58 })).to.deep.equal([]);
+  });
+
+  // A jump like this means a mis-read filing or a half-seeded cache.
+  it('flags a median that moved more than 25%', () => {
+    const problems = suspiciousShifts(before, { roe: 0.14, roa: 0.01, efficiency: 0.60 });
+    expect(problems).to.have.lengthOf(1);
+    expect(problems[0]).to.match(/^roe moved 40%/);
+  });
+
+  it('has nothing to compare on the first run', () => {
+    expect(suspiciousShifts(null, before)).to.deep.equal([]);
+  });
+});

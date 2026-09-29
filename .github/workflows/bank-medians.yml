@@ -1,0 +1,65 @@
+# Updates the bank medians once a year, after banks' annual reports are out.
+#
+# Bank grades compare each bank with the typical bank (lib/bankMedians.json).
+# Banks publish annual reports around February-March, and the daily refresh
+# keeps their cached figures current, so mid-April recomputes from the new year.
+#
+# What happens:
+#   - medians unchanged        -> nothing to do, no commit
+#   - medians changed normally -> the new file is committed; Render deploys it
+#                                 and the next daily refresh re-grades the banks
+#   - a median moved over 25%  -> the run fails without committing (that means
+#                                 bad data), and GitHub emails the repo owner
+#
+# Needs the MONGO_URI repository secret (already set for the daily refresh).
+# Can also be started by hand from the Actions tab ("Run workflow").
+
+name: Update bank medians
+
+on:
+  schedule:
+    # 12:00 UTC on 15 April every year.
+    - cron: '0 12 15 4 *'
+  workflow_dispatch:
+
+# The job commits lib/bankMedians.json back to the repo.
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --omit=dev
+
+      - name: Recompute the medians
+        id: medians
+        run: npm run bank-medians
+        env:
+          MONGO_URI: ${{ secrets.MONGO_URI }}
+
+      - name: Commit the new medians if they changed
+        env:
+          SUMMARY: ${{ steps.medians.outputs.summary }}
+        run: |
+          if git diff --quiet lib/bankMedians.json; then
+            echo "Medians unchanged — nothing to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add lib/bankMedians.json
+          git commit -m "Update bank medians" -m "$SUMMARY" -m "Recomputed automatically from the cached Banking-labelled stocks after this year's annual reports."
+          git push
