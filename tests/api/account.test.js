@@ -29,7 +29,8 @@ describe('account settings', () => {
     await WatchlistItem.create({ userId: user._id, ticker: 'AAPL', gradeAtAdd: 'A' });
     await SearchHistory.create({ userId: user._id, ticker: 'AAPL' });
     await SearchHistory.create({ userId: user._id, ticker: 'JPM' });
-    await Stock.create({ ticker: 'AAPL', grade: 'A', criteria: [], rawData: {} });
+    // Graded B today, though it was an A when added — so the export can show the change.
+    await Stock.create({ ticker: 'AAPL', grade: 'B', criteria: [], rawData: {} });
   }
 
   const auth = (req) => req.set('Authorization', `Bearer ${token}`);
@@ -67,7 +68,7 @@ describe('account settings', () => {
       expect(res.status).to.equal(200);
       expect(res.body.account).to.include({ email: 'cory@example.com', displayName: 'Cory' });
       expect(res.body.watchlist).to.have.lengthOf(1);
-      expect(res.body.watchlist[0]).to.include({ ticker: 'AAPL', gradeWhenAdded: 'A' });
+      expect(res.body.watchlist[0]).to.include({ ticker: 'AAPL', gradeWhenAdded: 'A', currentGrade: 'B' });
       expect(res.body.searchHistory.map((r) => r.ticker)).to.have.members(['AAPL', 'JPM']);
     });
 
