@@ -9,6 +9,9 @@ const jwt = require('jsonwebtoken');
 const { OAuth2Client } = require('google-auth-library');
 const User = require('../models/User');
 const verifyToken = require('../middleware/authMiddleware');
+const {
+  cleanDisplayName, confirmEmailMatches, buildExport, deleteAccount,
+} = require('../lib/account');
 
 const router = express.Router();
 
@@ -185,6 +188,56 @@ router.post('/google', async (req, res) => {
 // just shape req.user for the response.
 router.get('/me', verifyToken, (req, res) => {
   res.json({ user: publicUser(req.user) });
+});
+
+// ---------- Account settings ----------
+
+// PATCH /api/auth/me (protected)
+// Body: { displayName }  — an empty name clears it, so the app shows the email.
+// Returns: { user }
+router.patch('/me', verifyToken, async (req, res) => {
+  const { value, error } = cleanDisplayName(req.body.displayName);
+  if (error) return res.status(400).json({ message: error });
+
+  try {
+    const user = await User.findByIdAndUpdate(
+      req.user._id,
+      { displayName: value },
+      { returnDocument: 'after' }
+    );
+    res.json({ user: publicUser(user) });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
+// GET /api/auth/me/export (protected)
+// Everything the app stores about the current user, as JSON they can download.
+router.get('/me/export', verifyToken, async (req, res) => {
+  try {
+    res.json(await buildExport(req.user._id));
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
+// DELETE /api/auth/me (protected)
+// Body: { confirmEmail } — must match the account's email. The page checks this
+// too, but the server re-checks so a stray request can't delete an account.
+// Removes the user, their watchlist and their search history; the shared Stock
+// cache is left alone. The token stops working straight away, because every
+// protected request looks the user up again.
+router.delete('/me', verifyToken, async (req, res) => {
+  if (!confirmEmailMatches(req.body.confirmEmail, req.user.email)) {
+    return res.status(400).json({ message: 'Type your account email exactly to confirm.' });
+  }
+
+  try {
+    await deleteAccount(req.user._id);
+    res.status(204).end();
+  } catch (err) {
+    res.status(500).json({ message: 'Could not delete the account. Please try again.', error: err.message });
+  }
 });
 
 module.exports = router;

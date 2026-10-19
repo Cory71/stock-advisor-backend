@@ -5,6 +5,7 @@ const express = require('express');
 const SearchHistory = require('../models/SearchHistory');
 const Stock = require('../models/Stock');
 const verifyToken = require('../middleware/authMiddleware');
+const { clearHistory } = require('../lib/account');
 
 const router = express.Router();
 
@@ -41,6 +42,17 @@ router.get('/', async (req, res) => {
     }));
 
     res.json(enriched);
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
+// DELETE /api/history
+// Clears the current user's search history. Their account and watchlist stay.
+// Returns: { deleted } — how many entries were removed.
+router.delete('/', async (req, res) => {
+  try {
+    res.json({ deleted: await clearHistory(req.user._id) });
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });
   }
