@@ -10,7 +10,9 @@
     "seed": "node scripts/seed-popular.js",
     "refresh": "node scripts/refresh-cache.js",
     "seed:banks": "node scripts/seed-popular.js banks",
-    "bank-medians": "node scripts/compute-bank-medians.js"
+    "seed:sectors": "node scripts/seed-popular.js sectors",
+    "bank-medians": "node scripts/compute-bank-medians.js",
+    "sector-baselines": "node scripts/compute-sector-baselines.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

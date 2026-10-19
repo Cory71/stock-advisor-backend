@@ -9,6 +9,7 @@ const { installStubs, restore, DEFAULT_STOCK_DATA } = require('../helpers/mockPr
 const { createUserAndToken } = require('../helpers/authToken');
 const Stock = require('../../models/Stock');
 const SearchHistory = require('../../models/SearchHistory');
+const SectorBaseline = require('../../models/SectorBaseline');
 
 describe('GET /api/grade/:query', () => {
   let token;
@@ -201,5 +202,43 @@ describe('GET /api/grade/:query', () => {
     expect(res.body.message).to.include('SHOP.TO');
     // The 403 short-circuits before the search fallback runs.
     expect(resolveStub.called).to.equal(false);
+  });
+  // Sector context sits beside the grade, and only when enough peers exist.
+  describe('sector context', () => {
+    const techData = {
+      ...DEFAULT_STOCK_DATA,
+      industry: 'Technology',
+      annualYears: [2021, 2022, 2023, 2024, 2025],
+      annualFcfYears: [2021, 2022, 2023, 2024, 2025],
+    };
+
+    function saveBaseline(peers) {
+      const metric = { median: 0.1, peers };
+      return SectorBaseline.create({
+        industry: 'Technology', peerCount: peers, computedAt: new Date(),
+        metrics: { revenueCagr: metric, fcfMargin: metric, fcfCagr: metric },
+      });
+    }
+
+    it('includes the comparison when the industry has enough peers', async () => {
+      installStubs({ stockData: techData });
+      await saveBaseline(9);
+
+      const res = await request(app).get('/api/grade/AAPL').set('Authorization', `Bearer ${token}`);
+
+      expect(res.body.grade).to.equal('B');
+      expect(res.body.sectorContext.industry).to.equal('Technology');
+      expect(res.body.sectorContext.metrics[0]).to.include({ key: 'revenueCagr', peers: 9, position: 'above' });
+    });
+
+    it('leaves it out for a thin industry, without changing the grade', async () => {
+      installStubs({ stockData: techData });
+      await saveBaseline(4);
+
+      const res = await request(app).get('/api/grade/AAPL').set('Authorization', `Bearer ${token}`);
+
+      expect(res.body.grade).to.equal('B');
+      expect(res.body.sectorContext).to.equal(null);
+    });
   });
 });

@@ -9,6 +9,7 @@ const Stock = require('../models/Stock');
 const SearchHistory = require('../models/SearchHistory');
 const { gradeAndSave } = require('../lib/gradeAndSave');
 const { friendlyStockError } = require('../lib/friendlyError');
+const { sectorContextFor } = require('../lib/sectorBaselines');
 // Imported as a namespace (not destructured) so test stubs that swap out
 // `finnhubProvider.getStockData` are actually seen by these route handlers.
 const finnhubProvider = require('../providers/finnhubProvider');
@@ -49,6 +50,14 @@ function shape(stock, { cached, fallbackName }) {
     gradedAt: stock.updatedAt,
     cached
   };
+}
+
+// The shaped result plus how the stock compares with its industry (null when
+// there aren't enough peers). A failed lookup just leaves the comparison out —
+// it must never stop a grade from showing.
+async function shapeWithContext(stock, options) {
+  const sectorContext = await sectorContextFor(stock).catch(() => null);
+  return { ...shape(stock, options), sectorContext };
 }
 
 router.get('/:query', verifyToken, async (req, res) => {
@@ -97,7 +106,7 @@ router.get('/:query', verifyToken, async (req, res) => {
       }
 
       await recordHistory(req.user.id, ticker);
-      return res.json(shape(cached, { cached: true, fallbackName: resolvedName }));
+      return res.json(await shapeWithContext(cached, { cached: true, fallbackName: resolvedName }));
     }
 
     // Cache miss or stale — fetch fresh data from Finnhub.
@@ -126,7 +135,7 @@ router.get('/:query', verifyToken, async (req, res) => {
       const cachedAfter = await Stock.findOne({ ticker });
       if (!forceRefresh && cachedAfter && cachedAfter.price != null && Date.now() - cachedAfter.updatedAt.getTime() < CACHE_TTL_MS) {
         await recordHistory(req.user.id, ticker);
-        return res.json(shape(cachedAfter, { cached: true, fallbackName: resolvedName }));
+        return res.json(await shapeWithContext(cachedAfter, { cached: true, fallbackName: resolvedName }));
       }
       rawData = await finnhubProvider.getStockData(ticker);
     }
@@ -136,7 +145,7 @@ router.get('/:query', verifyToken, async (req, res) => {
     const saved = await gradeAndSave(ticker, rawData, { fallbackName: resolvedName });
 
     await recordHistory(req.user.id, ticker);
-    res.json(shape(saved, { cached: false, fallbackName: resolvedName }));
+    res.json(await shapeWithContext(saved, { cached: false, fallbackName: resolvedName }));
   } catch (err) {
     // This path fires when Finnhub is unreachable or returns an unexpected error.
     // 404s for unknown tickers are handled above. The raw error is included for

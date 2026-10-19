@@ -19,7 +19,11 @@ Express REST API for StockGrader, a web app that grades publicly traded stocks A
 - **Compare** — grade 2–3 stocks in a single request.
 - **Search history** — records each user's recent lookups.
 - **24-hour caching** in MongoDB to stay within Finnhub's rate limit, with on-demand refresh.
-- **Honest N/A + sector caveats** — banks/insurers return N/A; REITs and utilities carry a caveat where free cash flow is only a rough proxy.
+- **Bank grading** — stocks Finnhub labels `Banking` are graded on their own five criteria against the typical U.S. bank (`lib/gradingBank.js`).
+- **Sector context** — each grade can come with a comparison against the median of its industry (`lib/sectorContext.js`), shown only when at least 8 stocks in that industry are graded. It never changes the letter.
+- **Daily refresh** — a GitHub Actions job re-grades the whole cache every morning and rebuilds the sector medians.
+- **Account settings** — rename, export your data, clear search history, delete your account.
+- **Honest N/A + sector caveats** — stocks the model can't grade return N/A with a reason; REITs and utilities carry a caveat where free cash flow is only a rough proxy.
 - **Friendly errors** — no raw HTTP codes or provider names reach the user.
 
 ## Technologies Used
@@ -172,11 +176,11 @@ npm test
 ```
 
 Spins up an in-memory MongoDB (so your real cluster is never touched), stubs
-the Finnhub provider, and runs all 80 backend tests in ~5 seconds.
+the Finnhub provider, and runs all 192 backend tests in ~6 seconds.
 
-Tests live in `tests/` — 30 unit tests on the pure grading function, 41
-Supertest API tests across the 5 routes, and 9 provider tests for name
-resolution (common-name aliases + the U.S.-listing preference).
+Tests live in `tests/` — unit tests for the pure functions in `lib/` (grading,
+bank grading, sector context, rate limiter), Supertest API tests for every
+route in `tests/api/`, and provider tests in `tests/providers/`.
 
 ### Warming the cache (optional)
 
@@ -187,6 +191,10 @@ npm run seed
 Pre-grades ~10 popular tickers into MongoDB from your local machine. Handy in
 production: the deployed backend then serves those grades from cache without a
 live Finnhub call. Safe to re-run — it upserts.
+
+`npm run seed:banks` seeds the bank pool and `npm run seed:sectors` seeds the
+industry pools behind the sector comparison. Each seed ends by rebuilding the
+sector medians; `npm run sector-baselines` rebuilds them on their own.
 
 ## Troubleshooting
 
@@ -212,9 +220,13 @@ All `/api/*` routes (except `register` and `login`) require a valid JWT in the
 | POST | `/api/auth/login` | Verify email/password; returns a signed JWT |
 | POST | `/api/auth/google` | Verify a Google ID token; find-or-create the user and return a signed JWT |
 | GET | `/api/auth/me` | Return the current user |
+| PATCH | `/api/auth/me` | Change the display name |
+| GET | `/api/auth/me/export` | Download the user's account, watchlist and history as JSON |
+| DELETE | `/api/auth/me` | Delete the account, watchlist and history (body: `confirmEmail`) |
 | GET | `/api/grade/:query` | Grade a stock by ticker **or company name** (resolves names via Finnhub search; caches 24h). Add `?refresh=1` to bypass the cache and force a fresh re-grade |
 | GET | `/api/compare?tickers=A,B,C` | Grade 2 or 3 tickers/names in parallel |
 | GET | `/api/history` | User's last 20 lookups, enriched with company name |
+| DELETE | `/api/history` | Clear the user's search history |
 | GET | `/api/watchlist` | User's watchlist, enriched with name, current grade, last price, currency |
 | POST | `/api/watchlist` | Add a ticker/name; freezes current grade as `gradeAtAdd` |
 | POST | `/api/watchlist/refresh` | Force a fresh re-grade of every saved ticker (cache-bypassed), then return the updated list |
@@ -223,7 +235,8 @@ All `/api/*` routes (except `register` and `login`) require a valid JWT in the
 ## Data Models
 
 - **`User`** — email, passwordHash (bcrypt; optional for Google-only accounts), googleId (sparse-unique), displayName
-- **`Stock`** — ticker, name, price, currency, grade, criteria, `reason` (set on N/A), `note` (sector caveat), rawData (shared cache, 24h TTL)
+- **`Stock`** — ticker, name, price, currency, industry, model (`general` / `bank`), grade, criteria, `reason` (set on N/A), `note` (sector caveat), rawData (shared cache, 24h TTL)
+- **`SectorBaseline`** — industry, peerCount, and the median + peer count of each compared metric
 - **`WatchlistItem`** — userId, ticker, gradeAtAdd (compound unique index on user + ticker)
 - **`SearchHistory`** — userId, ticker
 
@@ -290,8 +303,5 @@ A few details that keep the grades honest:
 
 ## Future Improvements
 
-- **Scheduled re-grading** of cached stocks (e.g. a nightly job) so popular tickers stay fresh without a manual refresh.
-- **Sector-relative grading** — compare a stock against its industry peers, not just absolute thresholds.
 - **Broader coverage** — add a paid data source (or fallback) to grade non-US listings and ADRs.
-- **Queue / rate-limit handling** for large watchlist refreshes.
 - **Grade-change notifications** (email or webhook) when a watched stock's grade moves.

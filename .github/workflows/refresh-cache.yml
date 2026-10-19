@@ -25,9 +25,9 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    # A full run of ~80 stocks takes about 6 minutes; stop a hung run well
+    # A full run of ~165 stocks takes about 13 minutes; stop a hung run well
     # before GitHub's 6-hour default.
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     steps:
       - name: Check out the code

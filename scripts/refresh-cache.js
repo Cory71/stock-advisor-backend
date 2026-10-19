@@ -15,6 +15,7 @@
 require('dotenv').config();
 const mongoose = require('mongoose');
 const { refreshCache } = require('../lib/refreshCache');
+const { refreshSectorBaselines, describeBaselines } = require('../lib/sectorBaselines');
 
 function printSummary(summary, startedAt) {
   const seconds = Math.round((Date.now() - startedAt) / 1000);
@@ -57,6 +58,11 @@ async function main() {
 
   const summary = await refreshCache({ log: (line) => console.log(line) });
   printSummary(summary, startedAt);
+
+  // Fresh grades mean fresh numbers, so rebuild the sector medians too.
+  const baselines = await refreshSectorBaselines();
+  console.log(`\nSector baselines rebuilt for ${baselines.length} industries:`);
+  describeBaselines(baselines).forEach((line) => console.log(line));
 
   await mongoose.disconnect();
   process.exit(everythingFailed(summary) ? 1 : 0);

@@ -43,6 +43,13 @@ const stockSchema = new mongoose.Schema({
     default: 'general'
   },
 
+  // Finnhub's industry label (e.g. "Technology"). Copied out of rawData into
+  // its own indexed field so sector baselines can group stocks by it.
+  industry: {
+    type: String,
+    index: true
+  },
+
   // Exactly 5 criteria per the grading algorithm.
   criteria: {
     type: [criterionSchema],
