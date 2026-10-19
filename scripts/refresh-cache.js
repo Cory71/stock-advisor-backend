@@ -27,6 +27,12 @@ function printSummary(summary, startedAt) {
   console.log(`Took:           ${seconds}s`);
   for (const change of summary.gradeChanges) {
     console.log(`  ${change.ticker}: ${change.from} -> ${change.to}`);
+    // Why it changed — which criteria moved, and whether the quarterly report
+    // behind the TTM figures was a different one this time.
+    for (const line of change.criteria || []) console.log(`      ${line}`);
+    if (change.ttmQuarter) {
+      console.log(`      TTM built from ${change.ttmQuarter.from ?? 'unknown'} -> ${change.ttmQuarter.to ?? 'none'}`);
+    }
   }
   for (const failure of summary.failed) {
     console.log(`  FAILED ${failure.ticker}: ${failure.error}`);

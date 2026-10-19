@@ -450,6 +450,14 @@ function parseQuarterlyYTD(reports, symbol = null) {
 // Example: most recent 10-Q is Q2 FY2026 (Jan–Jun 2026 YTD).
 //   TTM = H1_2026 + (Full_Year_2025 − H1_2025)
 //       = Jul_2025_to_Jun_2026  ✓
+// Label of the newest quarterly report, e.g. "2026Q2" — the quarter the TTM
+// figures were built from. Null when there are no quarterly reports.
+function latestQuarterLabel(quartersYTD) {
+  if (quartersYTD.length === 0) return null;
+  const latest = quartersYTD[quartersYTD.length - 1];
+  return `${latest.year}Q${latest.quarter}`;
+}
+
 function computeTTM(annuals, quartersYTD, field) {
   if (quartersYTD.length === 0 || annuals.length === 0) return null;
 
@@ -510,6 +518,11 @@ async function getStockData(ticker) {
   const ttmRevenue      = computeTTM(annualData, quarterlyData, 'revenue');
   const ttmFreeCashFlow = computeTTM(annualData, quarterlyData, 'fcf');
 
+  // Which quarter those TTM figures came from. The daily refresh logs it when a
+  // grade changes: in October 2026 grades flipped for three days because the
+  // TTM inputs shifted, and nothing recorded which quarter had been used.
+  const ttmQuarter = latestQuarterLabel(quarterlyData);
+
   // The most recent annual report's year and period-end date. The grader uses
   // these to detect stale data (a ticker whose fundamentals belong to a defunct
   // filer, or that Finnhub simply hasn't refreshed). The end date is preferred
@@ -535,6 +548,7 @@ async function getStockData(ticker) {
     ttmRevenue,
     annualFreeCashFlows,
     ttmFreeCashFlow,
+    ttmQuarter,
     annualYears,
     annualFcfYears,
     latestAnnualYear,

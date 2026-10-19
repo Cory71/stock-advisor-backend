@@ -100,3 +100,52 @@ describe('refreshCache', () => {
     expect(summary).to.deep.equal({ checked: 0, refreshed: 0, skipped: [], failed: [], gradeChanges: [] });
   });
 });
+
+// --- Explaining a grade change ------------------------------------------
+// On 7-9 October 2026 grades flipped for three days and the log only held
+// letters. These check that a change now says which criteria moved and
+// whether the quarterly report behind the TTM figures changed.
+const { describeChange } = require('../lib/refreshCache');
+
+describe('describeChange', () => {
+  const criteria = (recentRevenue, recentFcf) => [
+    { name: 'Topline revenue growth (long-term)', passed: true },
+    { name: 'Recent revenue growth (TTM)', passed: recentRevenue },
+    { name: 'Net positive free cash flow', passed: true },
+    { name: 'Free cash flow growth (long-term)', passed: true },
+    { name: 'Recent free cash flow growth (TTM)', passed: recentFcf },
+  ];
+
+  // NVIDIA went A -> C on 7 October: both TTM criteria dropped together.
+  it('names the criteria that changed and the TTM quarter that moved', () => {
+    const before = { ticker: 'NVDA', grade: 'A', criteria: criteria(true, true), rawData: { ttmQuarter: '2027Q2' } };
+    const saved = { grade: 'C', criteria: criteria(null, null), rawData: { ttmQuarter: '2027Q1' } };
+
+    const change = describeChange(before, saved);
+
+    expect(change).to.include({ ticker: 'NVDA', from: 'A', to: 'C' });
+    expect(change.criteria).to.deep.equal([
+      'Recent revenue growth (TTM): pass -> n/a',
+      'Recent free cash flow growth (TTM): pass -> n/a',
+    ]);
+    expect(change.ttmQuarter).to.deep.equal({ from: '2027Q2', to: '2027Q1' });
+  });
+
+  it('leaves the TTM quarter out when it did not change', () => {
+    const before = { ticker: 'V', grade: 'A', criteria: criteria(true, true), rawData: { ttmQuarter: '2026Q3' } };
+    const saved = { grade: 'B', criteria: criteria(true, false), rawData: { ttmQuarter: '2026Q3' } };
+
+    const change = describeChange(before, saved);
+
+    expect(change.criteria).to.deep.equal(['Recent free cash flow growth (TTM): pass -> fail']);
+    expect(change.ttmQuarter).to.equal(null);
+  });
+
+  // Stocks cached before this change have no ttmQuarter recorded yet.
+  it('copes with an older cached stock that has no TTM quarter recorded', () => {
+    const before = { ticker: 'MDB', grade: 'C', criteria: criteria(null, null), rawData: {} };
+    const saved = { grade: 'A', criteria: criteria(true, true), rawData: { ttmQuarter: '2027Q2' } };
+
+    expect(describeChange(before, saved).ttmQuarter).to.deep.equal({ from: null, to: '2027Q2' });
+  });
+});
