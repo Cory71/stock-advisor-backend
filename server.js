@@ -14,6 +14,11 @@ const passport = require('./middleware/passport');
 
 const app = express();
 
+// Render puts one proxy in front of the app. Trusting it makes req.ip the
+// visitor's real address, so the guest rate limit counts each visitor
+// separately instead of treating everyone as the proxy.
+app.set('trust proxy', 1);
+
 // Middleware
 // CORS: in production, lock the allowlist down to the deployed frontend(s)
 // via the CORS_ORIGIN env var (comma-separated for multiple). In local dev

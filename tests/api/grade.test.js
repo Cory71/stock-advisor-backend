@@ -59,9 +59,43 @@ describe('GET /api/grade/:query', () => {
     expect(res.body.criteria.map((c) => c.name)).to.include('Return on equity');
   });
 
-  it('rejects requests without a JWT', async () => {
-    const res = await request(app).get('/api/grade/AAPL');
-    expect(res.status).to.equal(401);
+  // The grade route is public so first-time visitors can try the app.
+  // Guests get the grade, but nothing is saved for them.
+  describe('without a login', () => {
+    it('grades a stock with no JWT and saves no history', async () => {
+      installStubs();
+
+      const res = await request(app).get('/api/grade/AAPL');
+
+      expect(res.status).to.equal(200);
+      expect(res.body).to.include({ ticker: 'AAPL', name: 'Apple Inc.' });
+      expect(res.body.grade).to.match(/^[A-F]$/);
+      expect(await SearchHistory.countDocuments()).to.equal(0);
+    });
+
+    // An old token left in the browser shouldn't turn a grade into an error.
+    it('treats an invalid token as a guest', async () => {
+      installStubs();
+
+      const res = await request(app)
+        .get('/api/grade/AAPL')
+        .set('Authorization', 'Bearer not-a-real-token');
+
+      expect(res.status).to.equal(200);
+      expect(await SearchHistory.countDocuments()).to.equal(0);
+    });
+
+    // Forcing a fresh re-grade costs Finnhub calls, so it's for signed-in users.
+    it('ignores ?refresh=1 and serves the cached grade', async () => {
+      const { stockDataStub } = installStubs();
+      await request(app).get('/api/grade/AAPL');
+
+      const res = await request(app).get('/api/grade/AAPL?refresh=1');
+
+      expect(res.status).to.equal(200);
+      expect(res.body.cached).to.equal(true);
+      expect(stockDataStub.callCount).to.equal(1);
+    });
   });
 
   it('grades a real ticker on cache miss, then caches the result', async () => {

@@ -2,9 +2,15 @@
 // `query` can be either a ticker symbol (e.g. "AAPL") or a company name
 // (e.g. "Apple"). The route resolves names to canonical tickers via Finnhub's
 // search endpoint and caches the result in MongoDB for 24 hours.
+//
+// Public: anyone can grade a stock without logging in, so a first-time visitor
+// sees the app working straight away. Logging in adds the extras — the search
+// is saved to history, and ?refresh=1 can force a fresh re-grade. Guests are
+// rate limited (middleware/guestRateLimit.js).
 
 const express = require('express');
-const verifyToken = require('../middleware/authMiddleware');
+const optionalAuth = require('../middleware/optionalAuth');
+const { guestRateLimit } = require('../middleware/guestRateLimit');
 const Stock = require('../models/Stock');
 const SearchHistory = require('../models/SearchHistory');
 const { gradeAndSave } = require('../lib/gradeAndSave');
@@ -22,7 +28,10 @@ const TICKER_PATTERN = /^[A-Z]{1,5}(\.[A-Z]+)?$/;           // e.g. AAPL, BRK.A
 // Record a lookup in the user's history — but skip if their last search was
 // for the same ticker, so a Refresh / re-navigation doesn't fill the list with
 // duplicates. Fire-and-forget; we don't want history writes blocking the response.
-async function recordHistory(userId, ticker) {
+// Guests (no user) have no history, so nothing is saved for them.
+async function recordHistory(user, ticker) {
+  if (!user) return;
+  const userId = user.id;
   const lastSearch = await SearchHistory.findOne({ userId })
     .sort({ createdAt: -1 })
     .select('ticker');
@@ -60,7 +69,7 @@ async function shapeWithContext(stock, options) {
   return { ...shape(stock, options), sectorContext };
 }
 
-router.get('/:query', verifyToken, async (req, res) => {
+router.get('/:query', optionalAuth, guestRateLimit(), async (req, res) => {
   try {
     const raw = req.params.query.trim();
     let ticker = raw.toUpperCase();
@@ -81,7 +90,10 @@ router.get('/:query', verifyToken, async (req, res) => {
 
     // `?refresh=1` lets the user force a fresh re-grade from the grade page,
     // skipping the cache so the data and timestamp update on demand.
-    const forceRefresh = req.query.refresh === '1' || req.query.refresh === 'true';
+    // Signed-in users only — a guest always gets the cached grade when there is
+    // one, so the public route can't be used to burn through Finnhub calls.
+    const forceRefresh = Boolean(req.user)
+      && (req.query.refresh === '1' || req.query.refresh === 'true');
 
     // Try the cache first — same canonical ticker, same grade.
     // Cache is considered stale if it's older than the TTL, OR if it's missing
@@ -105,7 +117,7 @@ router.get('/:query', verifyToken, async (req, res) => {
         }
       }
 
-      await recordHistory(req.user.id, ticker);
+      await recordHistory(req.user, ticker);
       return res.json(await shapeWithContext(cached, { cached: true, fallbackName: resolvedName }));
     }
 
@@ -134,7 +146,7 @@ router.get('/:query', verifyToken, async (req, res) => {
       // (unless the user asked for a forced refresh).
       const cachedAfter = await Stock.findOne({ ticker });
       if (!forceRefresh && cachedAfter && cachedAfter.price != null && Date.now() - cachedAfter.updatedAt.getTime() < CACHE_TTL_MS) {
-        await recordHistory(req.user.id, ticker);
+        await recordHistory(req.user, ticker);
         return res.json(await shapeWithContext(cachedAfter, { cached: true, fallbackName: resolvedName }));
       }
       rawData = await finnhubProvider.getStockData(ticker);
@@ -144,7 +156,7 @@ router.get('/:query', verifyToken, async (req, res) => {
     // search returned earlier.
     const saved = await gradeAndSave(ticker, rawData, { fallbackName: resolvedName });
 
-    await recordHistory(req.user.id, ticker);
+    await recordHistory(req.user, ticker);
     res.json(await shapeWithContext(saved, { cached: false, fallbackName: resolvedName }));
   } catch (err) {
     // This path fires when Finnhub is unreachable or returns an unexpected error.

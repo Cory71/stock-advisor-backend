@@ -210,8 +210,11 @@ sector medians; `npm run sector-baselines` rebuilds them on their own.
 
 ## API Endpoints
 
-All `/api/*` routes (except `register` and `login`) require a valid JWT in the
-`Authorization: Bearer <token>` header.
+All `/api/*` routes (except `register`, `login`, `google` and `grade`) require
+a valid JWT in the `Authorization: Bearer <token>` header. The grade route is
+public so anyone can try the app: with a token the search is saved to history
+and `?refresh=1` works; without one, the grade is returned but nothing is saved,
+and guests are limited to 30 lookups per 15 minutes per IP address.
 
 | Method | Route | Description |
 | --- | --- | --- |
@@ -223,7 +226,7 @@ All `/api/*` routes (except `register` and `login`) require a valid JWT in the
 | PATCH | `/api/auth/me` | Change the display name |
 | GET | `/api/auth/me/export` | Download the user's account, watchlist and history as JSON |
 | DELETE | `/api/auth/me` | Delete the account, watchlist and history (body: `confirmEmail`) |
-| GET | `/api/grade/:query` | Grade a stock by ticker **or company name** (resolves names via Finnhub search; caches 24h). Add `?refresh=1` to bypass the cache and force a fresh re-grade |
+| GET | `/api/grade/:query` | **Public.** Grade a stock by ticker **or company name** (resolves names via Finnhub search; caches 24h). Signed-in users can add `?refresh=1` to bypass the cache and force a fresh re-grade |
 | GET | `/api/compare?tickers=A,B,C` | Grade 2 or 3 tickers/names in parallel |
 | GET | `/api/history` | User's last 20 lookups, enriched with company name |
 | DELETE | `/api/history` | Clear the user's search history |
